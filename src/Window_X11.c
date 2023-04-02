@@ -15,6 +15,10 @@
 #endif
 #include <stdio.h>
 
+#ifdef CC_BUILD_IRIX
+#define GLX_HYPERPIPE_PIPE_NAME_LENGTH_SGIX 80
+#endif
+
 #ifdef X_HAVE_UTF8_STRING
 #define CC_BUILD_XIM
 /* XIM support based off details described in */
