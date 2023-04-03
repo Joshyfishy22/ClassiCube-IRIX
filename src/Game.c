@@ -426,7 +426,12 @@ static void Game_Load(void) {
 	}
 
 	entTaskI = ScheduledTask_Add(GAME_DEF_TICKS, Entities_Tick);
+	//Sets Fast render as default for IRIX os (because SGI machines are slow)
+	#ifdef CC_BUILD_IRIX
+	EnvRenderer_SetMode(ENV_MINIMAL);
+	#else
 	if (Gfx_WarnIfNecessary()) EnvRenderer_SetMode(EnvRenderer_Minimal | ENV_LEGACY);
+	#endif
 	Server.BeginConnect();
 }
 
