@@ -1229,6 +1229,14 @@ static cc_result GetMachineID(cc_uint32* key) {
 	DecodeMachineID(host, HW_HOSTID_LEN, key);
 	return 0;
 }
+#elif defined CC_BUILD_IRIX
+static cc_result GetMachineID(cc_uint32* key) {
+    char sysid[MAXSYSIDSIZE] = { 0 }; /* MAXSYSIDSIZE = 64 */
+        if (syssgi(SGI_SYSID, sysid) < 0) return errno;
+
+    Mem_Copy(key, sysid, MACHINEID_LEN);
+    return 0;
+}
 #elif defined CC_BUILD_ANDROID
 static cc_result GetMachineID(cc_uint32* key) {
 	cc_string dir; char dirBuffer[STRING_SIZE];
