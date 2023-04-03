@@ -472,6 +472,10 @@ void Platform_LoadSysFonts(void) {
 	static const cc_string dirs[] = {
 		String_FromConst("/res/fonts")
 	};
+#elif defined CC_BUILD_IRIX
+    static const cc_string dirs[] = {
+        String_FromConst("/usr/lib/X11/fonts/")
+    };
 #else
 	static const cc_string dirs[] = {
 		String_FromConst("/usr/share/fonts"),
@@ -807,13 +811,15 @@ static cc_result Process_RawGetExePath(char* path, int* len) {
 }
 #elif defined CC_BUILD_IRIX
 static cc_result Process_RawGetExePath(char* path, int* len) {
-	static cc_string file = String_FromConst("ClassiCube");
+    static cc_string file = String_FromConst("ClassiCube");
 
-	/* TODO properly get exe path */
-	/* Maybe use PIOCOPENM from https://nixdoc.net/man-pages/IRIX/man4/proc.4.html */
-	Mem_Copy(path, file.buffer, file.length);
-	*len = file.length;
-	return 0;
+	
+    /* TODO properly get exe path /
+    / Maybe use PIOCOPENM from https://nixdoc.net/man-pages/IRIX/man4/proc.4.html */
+
+    Mem_Copy(path, file.buffer, file.length);
+    *len = file.length;
+    return 0;
 }
 #endif
 

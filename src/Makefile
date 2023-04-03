@@ -96,7 +96,8 @@ endif
 
 ifeq ($(PLAT),irix)
 CC=gcc
-LIBS=-lGL -lX11 -lXi -lm -lpthread -ldl
+LIBS=-lGL -lX11 -lXi -lm -lpthread -ldl 
+LDFLAGS=-Wl,-rpath-link=/usr/lib32 -Wl,-rpath=/usr/lib32:/usr/sgug/lib32
 endif
 
 ifeq ($(PLAT),psp)

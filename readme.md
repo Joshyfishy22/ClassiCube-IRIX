@@ -1,4 +1,4 @@
-ClassiCube is a custom Minecraft Classic and ClassiCube client written in C that works on Windows, macOS, Linux, Android, iOS, FreeBSD, NetBSD, OpenBSD, Solaris, Haiku, and in a web browser.<br>
+ClassiCube is a custom Minecraft Classic and ClassiCube client written in C that works on Windows, macOS, Linux, Android, iOS, FreeBSD, NetBSD, OpenBSD, Solaris, IRIX, Haiku, and in a web browser.<br>
 **It is not affiliated with (or supported by) Mojang AB, Minecraft, or Microsoft in any way.**
 
 ![screenshot_n](http://i.imgur.com/FCiwl27.png)
@@ -157,6 +157,12 @@ Install libexecinfo, curl and openal-soft package if needed
 #### Solaris
 
 ```gcc *.c -o ClassiCube -lm -lsocket -lX11 -lXi -lGL```
+
+#### IRIX
+
+Install Sgug-RSE (https://github.com/sgidevnet/sgug-rse) for GCC 9.2 and libs. Install Nekoware OpenAL (neko_openal-1.1.tardist) for Audio (Can severaly impact performace due the lack of .ogg decoding on SGI hardware. Add '''-DCC_BUILD_NOMUSIC -DCC_BUILD_NOSOUND''' to the build command to exclude audio).  
+
+```gcc *.c -o ClassiCube -Wl,-rpath-link=/usr/lib32 -Wl,-rpath=/usr/lib32:/usr/sgug/lib32 -lX11 -lGL -lGLcore -lGLU -lpthread -Wl,--allow-shlib-undefined -DCC_BUILD_GL11```
 
 #### Haiku
 
