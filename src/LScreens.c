@@ -18,6 +18,7 @@
 #include "Utils.h"
 #include "LBackend.h"
 #include "Http.h"
+#include "Constants.h"
 #define LAYOUTS static const struct LLayout
 
 /*########################################################################################################################*
@@ -745,7 +746,17 @@ static void MainScreen_DoLogin(void) {
 }
 static void MainScreen_Login(void* w) { MainScreen_DoLogin(); }
 
-static void MainScreen_Register(void* w) {
+static void MainScreen_Register(void* w) 
+{
+	#ifdef CC_BUILD_IRIX
+	#include <string.h>
+	char RegisterMessage[100] = "Go to ";
+    
+    strcat(RegisterMessage, REGISTERNEW_URL);
+    strcat(RegisterMessage, (" to register for a ClassiCube account to play online.") );
+	Window_ShowDialog("Register", RegisterMessage);
+	#endif
+
 	static const cc_string regUrl = String_FromConst(REGISTERNEW_URL);
 	cc_result res = Process_StartOpen(&regUrl);
 	if (res) Logger_SimpleWarn(res, "opening register webpage in browser");
