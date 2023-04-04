@@ -29,7 +29,10 @@
 #include <signal.h>
 #include <stdio.h>
 #include <netdb.h>
-
+//For IRIX OS
+#ifdef CC_BUILD_IRIX 
+<sys/syssgi.h>
+#endif
 #define Socket__Error() errno
 const cc_result ReturnCode_FileShareViolation = 1000000000; /* TODO: not used apparently */
 const cc_result ReturnCode_FileNotFound     = ENOENT;
