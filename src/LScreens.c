@@ -752,7 +752,7 @@ static void MainScreen_Register(void* w)
 	#include <string.h>
 	char RegisterMessage[100] = "Go to ";
     
-    strcat(RegisterMessage, REGISTERNEW_URL);
+    strcat(RegisterMessage, String_FromConst(REGISTERNEW_URL));
     strcat(RegisterMessage, (" to register for a ClassiCube account to play online.") );
 	Window_ShowDialog("Register", RegisterMessage);
 	#endif
