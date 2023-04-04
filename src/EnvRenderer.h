@@ -10,6 +10,7 @@ extern struct IGameComponent EnvRenderer_Component;
 
 #define ENV_MINIMAL 1
 #define ENV_LEGACY  2
+#define ENV_WIREFRAME 3
 
 /* Renders coloured sky plane. */
 void EnvRenderer_RenderSky(void);
@@ -39,6 +40,8 @@ extern cc_bool EnvRenderer_Legacy;
 /* Whether minimal environmental effects are rendered. */
 /* Minimal mode disables skybox, clouds and fog. */
 extern cc_bool EnvRenderer_Minimal;
+// Wireframe rendering mode flag// 
+extern cc_bool EnvRenderer_Wireframe;
 /* Sets whether Legacy and Minimal modes are used based on given flags. */
 void EnvRenderer_SetMode(int flags);
 /* Calculates mode flags for the given mode. */

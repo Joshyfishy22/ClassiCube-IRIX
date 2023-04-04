@@ -19,7 +19,7 @@
 #include "Particle.h"
 #include "Options.h"
 
-cc_bool EnvRenderer_Legacy, EnvRenderer_Minimal;
+cc_bool EnvRenderer_Legacy, EnvRenderer_Minimal, EnvRenderer_Wireframe;
 
 static float CalcBlendFactor(float x) {
 	/* return -0.05 + 0.22 * (Math_Log(x) * 0.25f); */
@@ -811,6 +811,11 @@ static void OnContextRecreated(void* obj) {
 void EnvRenderer_SetMode(int flags) {
 	EnvRenderer_Legacy  = flags & ENV_LEGACY;
 	EnvRenderer_Minimal = flags & ENV_MINIMAL;
+	#ifdef CC_BUILD_GL 
+	EnvRenderer_Wireframe = flags & ENV_WIREFRAME;
+	if(EnvRenderer_Wireframe) {setglPolygonMode(GL_LINE); } else {setglPolygonMode(GL_FILL); }
+	#endif
+	UpdateAll();
 	OnContextRecreated(NULL);
 }
 
@@ -818,6 +823,9 @@ int EnvRenderer_CalcFlags(const cc_string* mode) {
 	if (String_CaselessEqualsConst(mode, "normal")) return 0;
 	if (String_CaselessEqualsConst(mode, "legacy")) return ENV_LEGACY;
 	if (String_CaselessEqualsConst(mode, "fast"))   return ENV_MINIMAL;
+	#ifdef CC_BUILD_GL 
+	if (String_CaselessEqualsConst(mode, "wireframe")) return ENV_WIREFRAME;
+	#endif
 	/* backwards compatibility */
 	if (String_CaselessEqualsConst(mode, "normalfast")) return ENV_MINIMAL;
 	if (String_CaselessEqualsConst(mode, "legacyfast")) return ENV_LEGACY | ENV_MINIMAL;
@@ -874,6 +882,7 @@ static void OnInit(void) {
 	if (flags == -1) flags = 0;
 	EnvRenderer_Legacy  = flags & ENV_LEGACY;
 	EnvRenderer_Minimal = flags & ENV_MINIMAL;
+	EnvRenderer_Wireframe = flags & ENV_WIREFRAME;
 
 	TextureEntry_Register(&clouds_entry);
 	TextureEntry_Register(&skybox_entry);

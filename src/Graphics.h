@@ -24,6 +24,10 @@ typedef enum MatrixType_ {
 #define SIZEOF_VERTEX_COLOURED 16
 #define SIZEOF_VERTEX_TEXTURED 24
 
+//PolygonMode
+#define GL_LINE                    0x1B01
+#define GL_FILL                    0x1B02
+
 /* 3 floats for position (XYZ), 4 bytes for colour. */
 struct VertexColoured { float X, Y, Z; PackedCol Col; };
 /* 3 floats for position (XYZ), 2 floats for texture coordinates (UV), 4 bytes for colour. */
@@ -244,6 +248,9 @@ void Gfx_Begin2D(int width, int height);
 /* Switches state to be suitable for drawing 3D graphics. */
 /* NOTE: This means restoring fog/depth test, restoring matrices, etc. */
 void Gfx_End2D(void);
+
+//Draw In Wireframe Mode 
+void DrawWireframe();
 
 /* Sets appropriate alpha test/blending for given block draw type. */
 void Gfx_SetupAlphaState(cc_uint8 draw);
