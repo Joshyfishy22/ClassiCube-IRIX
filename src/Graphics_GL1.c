@@ -4,7 +4,7 @@
 #include "Errors.h"
 #include "Logger.h"
 #include "Window.h"
-#include "EnvRenderer.h"
+
 /* The OpenGL backend is a bit of a mess, since it's really 2 backends in one:
  * - OpenGL 1.1 (completely lacking GPU, fallbacks to say Windows built-in software rasteriser)
  * - OpenGL 1.5 or OpenGL 1.2 + GL_ARB_vertex_buffer_object (default desktop backend)
@@ -92,11 +92,6 @@ typedef void GLvoid;
 #define GL_COLOR_ARRAY           0x8076
 #define GL_TEXTURE_COORD_ARRAY   0x8078
 
-//Wireframe Render
-#define GL_FRONT_AND_BACK            0x0408
-#define GL_LINE                    0x1B01
-#define GL_FILL                    0x1B02
-
 /* Not present in gl.h on Windows (only up to OpenGL 1.1) */
 #define GL_ARRAY_BUFFER          0x8892
 #define GL_ELEMENT_ARRAY_BUFFER  0x8893
@@ -144,8 +139,8 @@ GLAPI void APIENTRY glTexParameteri(GLenum target, GLenum pname, GLint param);
 GLAPI void APIENTRY glTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type, const GLvoid* pixels);
 GLAPI void APIENTRY glVertexPointer(GLint size, GLenum type, GLsizei stride, const GLvoid* pointer);
 GLAPI void APIENTRY glViewport(GLint x, GLint y, GLsizei width, GLsizei height);
-//Wireframe Rendering
-GLAPI void APIENTRY glPolygonMode(GLenum face, GLenum mode);
+//sets Polygon Mode 
+GLAPI void APIENTRY glPolygonMode(GLenum face, GLenum mode); 
 
 /* === END OPENGL HEADERS === */
 
@@ -631,13 +626,6 @@ static void GLBackend_Init(void) {
 #define VB_PTR 0
 #define IB_PTR NULL
 #endif
-
-//Wireframe Rendering
-
-void setglPolygonMode(GLenum glline)
-{
-	glPolygonMode(GL_FRONT_AND_BACK, glline);
-}
 
 
 static void GL_SetupVbColoured(void) {

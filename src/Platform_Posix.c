@@ -660,11 +660,19 @@ static cc_result Process_RawStart(const char* path, char** argv) {
 	pid_t pid = fork();
 	if (pid == -1) return errno;
 
-	if (pid == 0) {
+	if (pid == 0) 
+	{
 		/* Executed in child process */
 		execvp(path, argv);
+		int errcode = errno;
+		char cwd_path[2048] = { 0 };
+		getcwd(cwd_path, 2048);
+		Platform_Log3("execing %c failed: %i (in %c)", path, &errcode, cwd_path);
 		_exit(127); /* "command not found" */
-	} else {
+
+	} 
+	else 
+	{
 		/* Executed in parent process */
 		/* We do nothing here.. */
 		return 0;
