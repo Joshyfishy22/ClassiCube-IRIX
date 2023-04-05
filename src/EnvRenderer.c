@@ -18,7 +18,6 @@
 #include "Camera.h"
 #include "Particle.h"
 #include "Options.h"
-#include "EnvRenderer.h"
 
 cc_bool EnvRenderer_Legacy, EnvRenderer_Minimal, EnvRenderer_Wireframe;
 
@@ -795,6 +794,7 @@ static void UpdateAll(void) {
 	UpdateSky();
 	UpdateSkybox();
 	EnvRenderer_UpdateFog();
+
 	Gfx_DeleteDynamicVb(&weather_vb);
 	if (Gfx.LostContext) return;
 	/* TODO: Don't allocate unless used? */
@@ -813,8 +813,8 @@ void EnvRenderer_SetMode(int flags) {
 	EnvRenderer_Minimal = flags & ENV_MINIMAL;
 	//Sets Wireframe If build in Opengl and set in render flags
 	#ifdef CC_BUILD_GL
-	EnvRenderer_Wireframe = flags & ENV_WIREFRAME;
-	if(EnvRenderer_Wireframe == true) {glPolygonMode(GL_FRONT_AND_BACK, GL_LINE); } else {glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);}
+	EnvRenderer_Wireframe = flags == ENV_WIREFRAME;
+	if(EnvRenderer_Wireframe) {glPolygonMode(GL_FRONT_AND_BACK, GL_LINE); } else {glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);}
 	#endif
 	UpdateAll();
 	OnContextRecreated(NULL);
@@ -824,7 +824,7 @@ int EnvRenderer_CalcFlags(const cc_string* mode) {
 	if (String_CaselessEqualsConst(mode, "normal")) return 0;
 	if (String_CaselessEqualsConst(mode, "legacy")) return ENV_LEGACY;
 	if (String_CaselessEqualsConst(mode, "fast"))   return ENV_MINIMAL;
-	#ifdef CC_BUILD_GL //Sets Wireframe If build in Opengl
+	#ifdef CC_BUILD_GL 
 	if (String_CaselessEqualsConst(mode, "wireframe")) return ENV_WIREFRAME;
 	#endif
 	/* backwards compatibility */
