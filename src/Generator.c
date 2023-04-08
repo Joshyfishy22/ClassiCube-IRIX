@@ -625,7 +625,7 @@ void NotchyGen_Generate(void) {
 	NotchyGen_CreateHeightmap();
 	NotchyGen_CreateStrata();
 	//Turns off caves for IRIX performance because of the lack of occlusion culling 
-	#ifndef CC_BUILD_IRIX
+	#ifndef CC_BUILD_LOWPOLYS
 	NotchyGen_CarveCaves();
 	#endif
 	NotchyGen_CarveOreVeins(0.9f, "Carving coal ore", BLOCK_COAL_ORE);
