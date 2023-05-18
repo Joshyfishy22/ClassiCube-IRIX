@@ -160,7 +160,7 @@ Install libexecinfo, curl and openal-soft package if needed
 
 #### IRIX
 
-Install Sgug-RSE (https://github.com/sgidevnet/sgug-rse) Install libX11, libgcc, libXau, libXdmcp, libcurl-devel,  from SGUG-RSE. Install Nekoware OpenAL (neko_openal-1.1.tardist) for Audio (Can impact performace due the lack of .ogg decoding on SGI hardware. Add ```-DCC_BUILD_NOMUSIC``` to the build command to exclude audio). use ```-DCC_BUILD_LOWPOLYS``` to cull leaves and remove cave generation to lower polycounts. Use GCC 9.2 from SGUG-RSE shell to compile. 
+Install Sgug-RSE (https://github.com/sgidevnet/sgug-rse) Install libX11, libgcc, libXau, libXdmcp, libcurl-devel, libGLU, LibGL from SGUG-RSE. Install Nekoware OpenAL (neko_openal-1.1.tardist) for Audio (Can impact performace due the lack of .ogg decoding on SGI hardware. Add ```-DCC_BUILD_NOMUSIC``` to the build command to exclude audio). use ```-DCC_BUILD_LOWPOLYS``` to cull leaves and remove cave generation to lower polycounts. Use GCC 9.2 from SGUG-RSE shell to compile. 
 
 ```gcc *.c -o ClassiCube -Wl,-rpath-link=/usr/lib32 -Wl,-rpath=/usr/lib32:/usr/sgug/lib32 -lX11 -lGL -lGLcore -lGLU -lpthread -Wl,--allow-shlib-undefined -DCC_BUILD_GL11```
 
