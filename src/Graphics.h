@@ -24,10 +24,17 @@ typedef enum MatrixType_ {
 #define SIZEOF_VERTEX_COLOURED 16
 #define SIZEOF_VERTEX_TEXTURED 24
 
+#if defined CC_BUILD_PSP
+/* 3 floats for position (XYZ), 4 bytes for colour. */
+struct VertexColoured { PackedCol Col; float X, Y, Z; };
+/* 3 floats for position (XYZ), 2 floats for texture coordinates (UV), 4 bytes for colour. */
+struct VertexTextured { float U, V; PackedCol Col; float X, Y, Z; };
+#else
 /* 3 floats for position (XYZ), 4 bytes for colour. */
 struct VertexColoured { float X, Y, Z; PackedCol Col; };
 /* 3 floats for position (XYZ), 2 floats for texture coordinates (UV), 4 bytes for colour. */
 struct VertexTextured { float X, Y, Z; PackedCol Col; float U, V; };
+#endif
 
 void Gfx_Create(void);
 void Gfx_Free(void);
@@ -61,7 +68,7 @@ extern const cc_string Gfx_LowPerfMessage;
 /* Texture should allow updating via Gfx_UpdateTexture */
 #define TEXTURE_FLAG_DYNAMIC 0x02
 
-#define LOWPERF_EXIT_MESSAGE  "&eExited reduced performance mode"
+#define LOWPERF_EXIT_MESSAGE "&eExited reduced performance mode"
 
 void Gfx_RecreateDynamicVb(GfxResourceID* vb, VertexFormat fmt, int maxVertices);
 void Gfx_RecreateTexture(GfxResourceID* tex, struct Bitmap* bmp, cc_uint8 flags, cc_bool mipmaps);
@@ -127,8 +134,10 @@ CC_API void Gfx_SetDepthWrite(cc_bool enabled);
 /*  NOTE: Implicitly calls Gfx_SetColWriteMask */
 CC_API void Gfx_DepthOnlyRendering(cc_bool depthOnly);
 
+/* Callback function to initialise/fill out the contents of an index buffer */
+typedef void (*Gfx_FillIBFunc)(cc_uint16* indices, int count, void* obj);
 /* Creates a new index buffer and fills out its contents. */
-CC_API GfxResourceID Gfx_CreateIb(void* indices, int indicesCount);
+CC_API GfxResourceID Gfx_CreateIb2(int count, Gfx_FillIBFunc fillFunc, void* obj);
 /* Sets the currently active index buffer. */
 CC_API void Gfx_BindIb(GfxResourceID ib);
 /* Deletes the given index buffer, then sets it to 0. */
@@ -193,10 +202,13 @@ CC_API void Gfx_LoadMatrix(MatrixType type, const struct Matrix* matrix);
 CC_API void Gfx_LoadIdentityMatrix(MatrixType type);
 CC_API void Gfx_EnableTextureOffset(float x, float y);
 CC_API void Gfx_DisableTextureOffset(void);
-/* Calculates an orthographic matrix suitable with this backend. (usually for 2D) */
-void Gfx_CalcOrthoMatrix(float width, float height, struct Matrix* matrix);
-/* Calculates a projection matrix suitable with this backend. (usually for 3D) */
-void Gfx_CalcPerspectiveMatrix(float fov, float aspect, float zFar, struct Matrix* matrix);
+
+/* Calculates an orthographic projection matrix suitable with this backend. (usually for 2D) */
+void Gfx_CalcOrthoMatrix(struct Matrix* matrix, float width, float height, float zNear, float zFar);
+/* Calculates a perspective projection matrix suitable with this backend. (usually for 3D) */
+void Gfx_CalcPerspectiveMatrix(struct Matrix* matrix, float fov, float aspect, float zFar);
+/* NOTE: Projection matrix calculation is here because it can depend the graphics backend */
+/*  (e.g. OpenGL uses a Z clip space range of [-1, 1], whereas Direct3D9 uses [0, 1]) */
 
 /* Outputs a .png screenshot of the backbuffer. */
 cc_result Gfx_TakeScreenshot(struct Stream* output);

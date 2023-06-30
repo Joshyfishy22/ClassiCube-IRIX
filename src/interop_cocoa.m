@@ -18,6 +18,9 @@ static cc_bool scroll_debugging;
 /*########################################################################################################################*
 *---------------------------------------------------Shared with Carbon----------------------------------------------------*
 *#########################################################################################################################*/
+extern size_t CGDisplayBitsPerPixel(CGDirectDisplayID display);
+// TODO: Try replacing with NSBitsPerPixelFromDepth([NSScreen mainScreen].depth) instead
+
 // NOTE: If code here is changed, don't forget to update corresponding code in Window_Carbon.c
 static void Window_CommonInit(void) {
 	CGDirectDisplayID display = CGMainDisplayID();
@@ -47,23 +50,23 @@ static void Window_CommonCreate(void) {
 // Sourced from https://www.meandmark.com/keycodes.html
 static const cc_uint8 key_map[8 * 16] = {
 	'A', 'S', 'D', 'F', 'H', 'G', 'Z', 'X', 'C', 'V', 0, 'B', 'Q', 'W', 'E', 'R',
-	'Y', 'T', '1', '2', '3', '4', '6', '5', KEY_EQUALS, '9', '7', KEY_MINUS, '8', '0', KEY_RBRACKET, 'O',
-	'U', KEY_LBRACKET, 'I', 'P', KEY_ENTER, 'L', 'J', KEY_QUOTE, 'K', KEY_SEMICOLON, KEY_BACKSLASH, KEY_COMMA, KEY_SLASH, 'N', 'M', KEY_PERIOD,
-	KEY_TAB, KEY_SPACE, KEY_TILDE, KEY_BACKSPACE, 0, KEY_ESCAPE, 0, 0, 0, KEY_CAPSLOCK, 0, 0, 0, 0, 0, 0,
-	0, KEY_KP_DECIMAL, 0, KEY_KP_MULTIPLY, 0, KEY_KP_PLUS, 0, KEY_NUMLOCK, 0, 0, 0, KEY_KP_DIVIDE, KEY_KP_ENTER, 0, KEY_KP_MINUS, 0,
-	0, KEY_KP_ENTER, KEY_KP0, KEY_KP1, KEY_KP2, KEY_KP3, KEY_KP4, KEY_KP5, KEY_KP6, KEY_KP7, 0, KEY_KP8, KEY_KP9, 'N', 'M', KEY_PERIOD,
-	KEY_F5, KEY_F6, KEY_F7, KEY_F3, KEY_F8, KEY_F9, 0, KEY_F11, 0, KEY_F13, 0, KEY_F14, 0, KEY_F10, 0, KEY_F12,
-	'U', KEY_F15, KEY_INSERT, KEY_HOME, KEY_PAGEUP, KEY_DELETE, KEY_F4, KEY_END, KEY_F2, KEY_PAGEDOWN, KEY_F1, KEY_LEFT, KEY_RIGHT, KEY_DOWN, KEY_UP, 0,
+	'Y', 'T', '1', '2', '3', '4', '6', '5', IPT_EQUALS, '9', '7', IPT_MINUS, '8', '0', IPT_RBRACKET, 'O',
+	'U', IPT_LBRACKET, 'I', 'P', IPT_ENTER, 'L', 'J', IPT_QUOTE, 'K', IPT_SEMICOLON, IPT_BACKSLASH, IPT_COMMA, IPT_SLASH, 'N', 'M', IPT_PERIOD,
+	IPT_TAB, IPT_SPACE, IPT_TILDE, IPT_BACKSPACE, 0, IPT_ESCAPE, 0, 0, 0, IPT_CAPSLOCK, 0, 0, 0, 0, 0, 0,
+	0, IPT_KP_DECIMAL, 0, IPT_KP_MULTIPLY, 0, IPT_KP_PLUS, 0, IPT_NUMLOCK, 0, 0, 0, IPT_KP_DIVIDE, IPT_KP_ENTER, 0, IPT_KP_MINUS, 0,
+	0, IPT_KP_ENTER, IPT_KP0, IPT_KP1, IPT_KP2, IPT_KP3, IPT_KP4, IPT_KP5, IPT_KP6, IPT_KP7, 0, IPT_KP8, IPT_KP9, 'N', 'M', IPT_PERIOD,
+	IPT_F5, IPT_F6, IPT_F7, IPT_F3, IPT_F8, IPT_F9, 0, IPT_F11, 0, IPT_F13, 0, IPT_F14, 0, IPT_F10, 0, IPT_F12,
+	'U', IPT_F15, IPT_INSERT, IPT_HOME, IPT_PAGEUP, IPT_DELETE, IPT_F4, IPT_END, IPT_F2, IPT_PAGEDOWN, IPT_F1, IPT_LEFT, IPT_RIGHT, IPT_DOWN, IPT_UP, 0,
 };
 static int MapNativeKey(UInt32 key) { return key < Array_Elems(key_map) ? key_map[key] : 0; }
 // TODO: Check these..
-//   case 0x37: return KEY_LWIN;
-//   case 0x38: return KEY_LSHIFT;
-//   case 0x3A: return KEY_LALT;
+//   case 0x37: return IPT_LWIN;
+//   case 0x38: return IPT_LSHIFT;
+//   case 0x3A: return IPT_LALT;
 //   case 0x3B: return Key_ControlLeft;
 
 // TODO: Verify these differences from OpenTK
-//Backspace = 51,  (0x33, KEY_DELETE according to that link)
+//Backspace = 51,  (0x33, IPT_DELETE according to that link)
 //Return = 52,     (0x34, ??? according to that link)
 //Menu = 110,      (0x6E, ??? according to that link)
 
@@ -125,13 +128,37 @@ void Clipboard_SetText(const cc_string* value) {
 	[pasteboard setString:str forType:NSStringPboardType];
 }
 
+
+static void LogUnhandled(NSString* str) {
+	if (!str) return;
+	const char* src = [str UTF8String];
+	if (!src) return;
+	
+	cc_string msg = String_FromReadonly(src);
+	Platform_Log(msg.buffer, msg.length);
+	Logger_Log(&msg);
+}
+
+// TODO: Should really be handled elsewhere, in Logger or ErrorHandler
+static void LogUnhandledNSErrors(NSException* ex) {
+	// last chance to log exception details before process dies
+	LogUnhandled(@"About to die from unhandled NSException..");
+	LogUnhandled([ex name]);
+	LogUnhandled([ex reason]);
+}
+
 static NSAutoreleasePool* pool;
 void Window_Init(void) {
+	NSSetUncaughtExceptionHandler(LogUnhandledNSErrors);
+
 	// https://www.cocoawithlove.com/2009/01/demystifying-nsapplication-by.html
 	pool = [[NSAutoreleasePool alloc] init];
 	appHandle = [NSApplication sharedApplication];
 	[appHandle activateIgnoringOtherApps:YES];
 	Window_CommonInit();
+
+	// NSApplication sometimes replaces the uncaught exception handler, so set it again
+	NSSetUncaughtExceptionHandler(LogUnhandledNSErrors);
 }
 
 
@@ -229,7 +256,7 @@ static void DoDrawFramebuffer(CGRect dirty);
 	//   Although the game receives a left mouse down event, it does NOT receive a left mouse up
 	//   This causes the game to get stuck with left mouse down after user finishes resizing
 	// So work arond that by always releasing left mouse when a live resize is finished
-	Input_SetReleased(KEY_LMOUSE);
+	Input_SetReleased(IPT_LMOUSE);
 }
 @end
 
@@ -365,11 +392,11 @@ void Window_Close(void) {
 }
 
 static int MapNativeMouse(long button) {
-	if (button == 0) return KEY_LMOUSE;
-	if (button == 1) return KEY_RMOUSE;
-	if (button == 2) return KEY_MMOUSE;
-	if (button == 3) return KEY_XBUTTON1;
-	if (button == 4) return KEY_XBUTTON2;
+	if (button == 0) return IPT_LMOUSE;
+	if (button == 1) return IPT_RMOUSE;
+	if (button == 2) return IPT_MMOUSE;
+	if (button == 3) return IPT_XBUTTON1;
+	if (button == 4) return IPT_XBUTTON2;
 	return 0;
 }
 
@@ -470,15 +497,15 @@ void Window_ProcessEvents(void) {
 		case 12: // NSFlagsChanged
 			key = [ev modifierFlags];
 			// TODO: Figure out how to only get modifiers that changed
-			Input_Set(KEY_LCTRL,    key & 0x000001);
-			Input_Set(KEY_LSHIFT,   key & 0x000002);
-			Input_Set(KEY_RSHIFT,   key & 0x000004);
-			Input_Set(KEY_LWIN,     key & 0x000008);
-			Input_Set(KEY_RWIN,     key & 0x000010);
-			Input_Set(KEY_LALT,     key & 0x000020);
-			Input_Set(KEY_RALT,     key & 0x000040);
-			Input_Set(KEY_RCTRL,    key & 0x002000);
-			Input_Set(KEY_CAPSLOCK, key & 0x010000);
+			Input_Set(IPT_LCTRL,    key & 0x000001);
+			Input_Set(IPT_LSHIFT,   key & 0x000002);
+			Input_Set(IPT_RSHIFT,   key & 0x000004);
+			Input_Set(IPT_LWIN,     key & 0x000008);
+			Input_Set(IPT_RWIN,     key & 0x000010);
+			Input_Set(IPT_LALT,     key & 0x000020);
+			Input_Set(IPT_RALT,     key & 0x000040);
+			Input_Set(IPT_RCTRL,    key & 0x002000);
+			Input_Set(IPT_CAPSLOCK, key & 0x010000);
 			break;
 
 		case 22: // NSScrollWheel
@@ -516,10 +543,11 @@ void ShowDialogCore(const char* title, const char* msg) {
 	CFStringRef titleCF, msgCF;
 	NSAlert* alert;
 	
-	alert   = [NSAlert alloc];
-	alert   = [alert init];
 	titleCF = CFStringCreateWithCString(NULL, title, kCFStringEncodingASCII);
 	msgCF   = CFStringCreateWithCString(NULL, msg,   kCFStringEncodingASCII);
+	
+	alert = [NSAlert alloc];
+	alert = [alert init];
 	
 	[alert setMessageText: titleCF];
 	[alert setInformativeText: msgCF];

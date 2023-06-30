@@ -19,6 +19,15 @@ Copyright 2014-2022 ClassiCube | Licensed under BSD-3
 #elif defined CC_BUILD_IOS
 #define GAME_APP_NAME  "ClassiCube 1.3.5 iOS alpha"
 #define GAME_APP_TITLE "ClassiCube 1.3.5 iOS alpha"
+#elif defined CC_BUILD_3DS
+#define GAME_APP_NAME  "ClassiCube 1.3.5 3DS"
+#define GAME_APP_TITLE "ClassiCube 1.3.5 3DS"
+#elif defined CC_BUILD_PSP
+#define GAME_APP_NAME  "ClassiCube 1.3.5 PSP"
+#define GAME_APP_TITLE "ClassiCube 1.3.5 PSP"
+#elif defined CC_BUILD_GCWII
+#define GAME_APP_NAME  "ClassiCube 1.3.5 GC/Wii"
+#define GAME_APP_TITLE "ClassiCube 1.3.5 GC/Wii"
 #else
 #define GAME_APP_NAME  "ClassiCube 1.3.5"
 #define GAME_APP_TITLE "ClassiCube 1.3.5"

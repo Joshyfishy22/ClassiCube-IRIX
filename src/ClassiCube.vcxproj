@@ -419,7 +419,9 @@
     <ClInclude Include="Screens.h" />
     <ClInclude Include="SelectionBox.h" />
     <ClInclude Include="Server.h" />
+    <ClInclude Include="SSL.h" />
     <ClInclude Include="Stream.h" />
+    <ClInclude Include="SystemFonts.h" />
     <ClInclude Include="TexturePack.h" />
     <ClInclude Include="Utils.h" />
     <ClInclude Include="PackedCol.h" />
@@ -499,8 +501,10 @@
     <ClCompile Include="Screens.c" />
     <ClCompile Include="SelectionBox.c" />
     <ClCompile Include="Server.c" />
+    <ClCompile Include="SSL.c" />
     <ClCompile Include="Stream.c" />
     <ClCompile Include="String.c" />
+    <ClCompile Include="SystemFonts.c" />
     <ClCompile Include="TexturePack.c" />
     <ClCompile Include="Utils.c" />
     <ClCompile Include="Vectors.c" />
@@ -528,6 +532,9 @@
     <ClCompile Include="_smooth.c" />
     <ClCompile Include="_truetype.c" />
     <ClCompile Include="_type1.c" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="..\misc\CCicon.rc" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -32,6 +32,7 @@
 #include "Input.h"
 #include "Utils.h"
 #include "Errors.h"
+#include "SystemFonts.h"
 
 /* Describes a menu option button */
 struct MenuOptionDesc {
@@ -308,9 +309,9 @@ static void ListScreen_Select(struct ListScreen* s, const cc_string* str) {
 
 static int ListScreen_KeyDown(void* screen, int key) {
 	struct ListScreen* s = (struct ListScreen*)screen;
-	if (key == KEY_LEFT || key == KEY_PAGEUP) {
+	if (key == IPT_LEFT || key == IPT_PAGEUP) {
 		ListScreen_PageClick(s, false);
-	} else if (key == KEY_RIGHT || key == KEY_PAGEDOWN) {
+	} else if (key == IPT_RIGHT || key == IPT_PAGEDOWN) {
 		ListScreen_PageClick(s, true);
 	}
 	return true;
@@ -741,7 +742,7 @@ static struct Widget* edithotkey_widgets[7] = {
 	(struct Widget*)&EditHotkeyScreen.btns[4], (struct Widget*)&EditHotkeyScreen.input,
 	(struct Widget*)&EditHotkeyScreen.cancel
 };
-#define EDITHOTKEY_MAX_VERTICES (MENUINPUTWIDGET_MAX + 6 * BUTTONWIDGET_MAX)
+#define EDITHOTIPT_MAX_VERTICES (MENUINPUTWIDGET_MAX + 6 * BUTTONWIDGET_MAX)
 
 static void HotkeyListScreen_MakeFlags(int flags, cc_string* str);
 static void EditHotkeyScreen_MakeFlags(int flags, cc_string* str) {
@@ -878,9 +879,9 @@ static int EditHotkeyScreen_KeyDown(void* screen, int key) {
 		if (s->selectedI == 0) {
 			s->curHotkey.trigger = key;
 		} else if (s->selectedI == 1) {
-			if      (key == KEY_LCTRL  || key == KEY_RCTRL)  s->curHotkey.mods |= HOTKEY_MOD_CTRL;
-			else if (key == KEY_LSHIFT || key == KEY_RSHIFT) s->curHotkey.mods |= HOTKEY_MOD_SHIFT;
-			else if (key == KEY_LALT   || key == KEY_RALT)   s->curHotkey.mods |= HOTKEY_MOD_ALT;
+			if      (key == IPT_LCTRL  || key == IPT_RCTRL)  s->curHotkey.mods |= HOTKEY_MOD_CTRL;
+			else if (key == IPT_LSHIFT || key == IPT_RSHIFT) s->curHotkey.mods |= HOTKEY_MOD_SHIFT;
+			else if (key == IPT_LALT   || key == IPT_RALT)   s->curHotkey.mods |= HOTKEY_MOD_ALT;
 			else s->curHotkey.mods = 0;
 		}
 
@@ -903,7 +904,7 @@ static void EditHotkeyScreen_ContextLost(void* screen) {
 
 static void EditHotkeyScreen_ContextRecreated(void* screen) {
 	struct EditHotkeyScreen* s = (struct EditHotkeyScreen*)screen;
-	cc_bool existed = s->origHotkey.trigger != KEY_NONE;
+	cc_bool existed = s->origHotkey.trigger != IPT_NONE;
 
 	Gui_MakeTitleFont(&s->titleFont);
 	Gui_MakeBodyFont(&s->textFont);
@@ -952,7 +953,7 @@ static void EditHotkeyScreen_Init(void* screen) {
 	s->widgets     = edithotkey_widgets;
 	s->numWidgets  = Array_Elems(edithotkey_widgets);
 	s->selectedI   = -1;
-	s->maxVertices = EDITHOTKEY_MAX_VERTICES;
+	s->maxVertices = EDITHOTIPT_MAX_VERTICES;
 	MenuInput_String(desc);
 
 	ButtonWidget_Init(&s->btns[0], 300, EditHotkeyScreen_BaseKey);
@@ -1573,7 +1574,7 @@ static void FontListScreen_EntryClick(void* screen, void* widget) {
 	cc_string fontName   = ListScreen_UNSAFE_GetCur(s, widget);
 
 	Options_Set(OPT_FONT_NAME, &fontName);
-	Font_SetDefault(&fontName);
+	SysFont_SetDefault(&fontName);
 }
 
 static void FontListScreen_UpdateEntry(struct ListScreen* s, struct ButtonWidget* button, const cc_string* text) {
@@ -1632,7 +1633,7 @@ static void HotkeyListScreen_EntryClick(void* screen, void* widget) {
 	if (String_ContainsConst(&value, "Shift")) mods |= HOTKEY_MOD_SHIFT;
 	if (String_ContainsConst(&value, "Alt"))   mods |= HOTKEY_MOD_ALT;
 
-	trigger = Utils_ParseEnum(&key, KEY_NONE, Input_DisplayNames, INPUT_COUNT);
+	trigger = Utils_ParseEnum(&key, IPT_NONE, Input_DisplayNames, INPUT_COUNT);
 	for (i = 0; i < HotkeysText.count; i++) {
 		h = HotkeysList[i];
 		if (h.trigger == trigger && h.mods == mods) { original = h; break; }
@@ -1710,9 +1711,9 @@ static void LoadLevelScreen_EntryClick(void* screen, void* widget) {
 }
 
 static void LoadLevelScreen_FilterFiles(const cc_string* path, void* obj) {
-	IMapImporter importer = Map_FindImporter(path);
+	struct MapImporter* imp = MapImporter_Find(path);
 	cc_string relPath = *path;
-	if (!importer) return;
+	if (!imp) return;
 
 	Utils_UNSAFE_TrimFirstDirectory(&relPath);
 	StringsBuffer_Add((struct StringsBuffer*)obj, &relPath);
@@ -1727,8 +1728,8 @@ static void LoadLevelScreen_LoadEntries(struct ListScreen* s) {
 static void LoadLevelScreen_UploadCallback(const cc_string* path) { Map_LoadFrom(path); }
 static void LoadLevelScreen_UploadFunc(void* s, void* w) {
 	static const char* const filters[] = { 
-		".cw", ".dat", ".lvl", ".mine", ".fcm", NULL 
-	};
+		".cw", ".dat", ".lvl", ".mine", ".fcm", ".mclevel", NULL 
+	}; /* TODO not hardcode list */
 	static struct OpenFileDialogArgs args = {
 		"Classic map files", filters,
 		LoadLevelScreen_UploadCallback,
@@ -1809,7 +1810,7 @@ static int KeyBindsScreen_KeyDown(void* screen, int key) {
 
 	if (s->curI == -1) return Screen_InputDown(s, key);
 	bind = s->binds[s->curI];
-	if (key == KEY_ESCAPE) key = KeyBind_Defaults[bind];
+	if (key == IPT_ESCAPE) key = KeyBind_Defaults[bind];
 	KeyBind_Set(bind, key);
 
 	idx         = s->curI;
@@ -1934,8 +1935,8 @@ static void KeyBindsScreen_Show(int bindsCount, const cc_uint8* binds, const cha
 *-----------------------------------------------ClassicKeyBindsScreen--------------------------------------------------*
 *#########################################################################################################################*/
 void ClassicKeyBindingsScreen_Show(void) {
-	static const cc_uint8 binds[10]    = { KEYBIND_FORWARD, KEYBIND_BACK, KEYBIND_JUMP, KEYBIND_CHAT, KEYBIND_SET_SPAWN, KEYBIND_LEFT, KEYBIND_RIGHT, KEYBIND_INVENTORY, KEYBIND_FOG, KEYBIND_RESPAWN };
-	static const char* const descs[10] = { "Forward", "Back", "Jump", "Chat", "Save location", "Left", "Right", "Build", "Toggle fog", "Load location" };
+	static const cc_uint8 binds[]    = { KEYBIND_FORWARD, KEYBIND_BACK, KEYBIND_JUMP, KEYBIND_CHAT, KEYBIND_SET_SPAWN, KEYBIND_LEFT, KEYBIND_RIGHT, KEYBIND_INVENTORY, KEYBIND_FOG, KEYBIND_RESPAWN };
+	static const char* const descs[] = { "Forward", "Back", "Jump", "Chat", "Save location", "Left", "Right", "Build", "Toggle fog", "Load location" };
 	
 	if (Game_ClassicHacks) {
 		KeyBindsScreen_Reset(NULL, Menu_SwitchKeysClassicHacks, 260);
@@ -1965,8 +1966,8 @@ void ClassicHacksKeyBindingsScreen_Show(void) {
 *-----------------------------------------------NormalKeyBindingsScreen---------------------------------------------------*
 *#########################################################################################################################*/
 void NormalKeyBindingsScreen_Show(void) {
-	static const cc_uint8 binds[12]    = { KEYBIND_FORWARD, KEYBIND_BACK, KEYBIND_JUMP, KEYBIND_CHAT, KEYBIND_SET_SPAWN, KEYBIND_TABLIST, KEYBIND_LEFT, KEYBIND_RIGHT, KEYBIND_INVENTORY, KEYBIND_FOG, KEYBIND_RESPAWN, KEYBIND_SEND_CHAT };
-	static const char* const descs[12] = { "Forward", "Back", "Jump", "Chat", "Set spawn", "Player list", "Left", "Right", "Inventory", "Toggle fog", "Respawn", "Send chat" };
+	static const cc_uint8 binds[]    = { KEYBIND_FORWARD, KEYBIND_BACK, KEYBIND_JUMP, KEYBIND_CHAT, KEYBIND_SET_SPAWN, KEYBIND_TABLIST, KEYBIND_LEFT, KEYBIND_RIGHT, KEYBIND_INVENTORY, KEYBIND_FOG, KEYBIND_RESPAWN, KEYBIND_SEND_CHAT };
+	static const char* const descs[] = { "Forward", "Back", "Jump", "Chat", "Set spawn", "Player list", "Left", "Right", "Inventory", "Toggle fog", "Respawn", "Send chat" };
 	
 	KeyBindsScreen_Reset(NULL, Menu_SwitchKeysHacks, 250);
 	KeyBindsScreen_SetLayout(-140, 10, 6);
@@ -1978,8 +1979,8 @@ void NormalKeyBindingsScreen_Show(void) {
 *------------------------------------------------HacksKeyBindingsScreen---------------------------------------------------*
 *#########################################################################################################################*/
 void HacksKeyBindingsScreen_Show(void) {
-	static const cc_uint8 binds[8]    = { KEYBIND_SPEED, KEYBIND_NOCLIP, KEYBIND_HALF_SPEED, KEYBIND_ZOOM_SCROLL, KEYBIND_FLY, KEYBIND_FLY_UP, KEYBIND_FLY_DOWN, KEYBIND_THIRD_PERSON };
-	static const char* const descs[8] = { "Speed", "Noclip", "Half speed", "Scroll zoom", "Fly", "Fly up", "Fly down", "Third person" };
+	static const cc_uint8 binds[]    = { KEYBIND_SPEED, KEYBIND_NOCLIP, KEYBIND_HALF_SPEED, KEYBIND_ZOOM_SCROLL, KEYBIND_FLY, KEYBIND_FLY_UP, KEYBIND_FLY_DOWN, KEYBIND_THIRD_PERSON };
+	static const char* const descs[] = { "Speed", "Noclip", "Half speed", "Scroll zoom", "Fly", "Fly up", "Fly down", "Third person" };
 	
 	KeyBindsScreen_Reset(Menu_SwitchKeysNormal, Menu_SwitchKeysOther, 260);
 	KeyBindsScreen_SetLayout(-40, 10, 4);
@@ -1991,8 +1992,8 @@ void HacksKeyBindingsScreen_Show(void) {
 *------------------------------------------------OtherKeyBindingsScreen---------------------------------------------------*
 *#########################################################################################################################*/
 void OtherKeyBindingsScreen_Show(void) {
-	static const cc_uint8 binds[12]     = { KEYBIND_EXT_INPUT, KEYBIND_HIDE_FPS, KEYBIND_HIDE_GUI, KEYBIND_HOTBAR_SWITCH, KEYBIND_DROP_BLOCK,KEYBIND_SCREENSHOT, KEYBIND_FULLSCREEN, KEYBIND_AXIS_LINES, KEYBIND_AUTOROTATE, KEYBIND_SMOOTH_CAMERA, KEYBIND_IDOVERLAY, KEYBIND_BREAK_LIQUIDS };
-	static const char* const descs[12]  = { "Show ext input", "Hide FPS", "Hide gui", "Hotbar switching", "Drop block", "Screenshot", "Fullscreen", "Show axis lines", "Auto-rotate", "Smooth camera", "ID overlay", "Breakable liquids" };
+	static const cc_uint8 binds[]     = { KEYBIND_EXT_INPUT, KEYBIND_HIDE_FPS, KEYBIND_HIDE_GUI, KEYBIND_HOTBAR_SWITCH, KEYBIND_DROP_BLOCK,KEYBIND_SCREENSHOT, KEYBIND_FULLSCREEN, KEYBIND_AXIS_LINES, KEYBIND_AUTOROTATE, KEYBIND_SMOOTH_CAMERA, KEYBIND_IDOVERLAY, KEYBIND_BREAK_LIQUIDS };
+	static const char* const descs[]  = { "Show ext input", "Hide FPS", "Hide gui", "Hotbar switching", "Drop block", "Screenshot", "Fullscreen", "Show axis lines", "Auto-rotate", "Smooth camera", "ID overlay", "Breakable liquids" };
 	
 	KeyBindsScreen_Reset(Menu_SwitchKeysHacks, Menu_SwitchKeysMouse, 260);
 	KeyBindsScreen_SetLayout(-140, 10, 6);
@@ -2004,11 +2005,11 @@ void OtherKeyBindingsScreen_Show(void) {
 *------------------------------------------------MouseKeyBindingsScreen---------------------------------------------------*
 *#########################################################################################################################*/
 void MouseKeyBindingsScreen_Show(void) {
-	static const cc_uint8 binds[3]    = { KEYBIND_DELETE_BLOCK, KEYBIND_PICK_BLOCK, KEYBIND_PLACE_BLOCK };
-	static const char* const descs[3] = { "Delete block", "Pick block", "Place block" };
+	static const cc_uint8 binds[]    = { KEYBIND_DELETE_BLOCK, KEYBIND_PICK_BLOCK, KEYBIND_PLACE_BLOCK, KEYBIND_LOOK_UP, KEYBIND_LOOK_DOWN, KEYBIND_LOOK_LEFT, KEYBIND_LOOK_RIGHT };
+	static const char* const descs[] = { "Delete block", "Pick block", "Place block", "Look Up", "Look Down", "Look Left", "Look Right" };
 
 	KeyBindsScreen_Reset(Menu_SwitchKeysOther, NULL, 260);
-	KeyBindsScreen_SetLayout(-40, 10, -1);
+	KeyBindsScreen_SetLayout(-140, 10, 3);
 	KeyBindsScreen.msgText = "&ePress escape to reset the binding";
 	KeyBindsScreen_Show(Array_Elems(binds), binds, descs, "Mouse key bindings");
 }
@@ -2063,7 +2064,7 @@ static int MenuInputOverlay_KeyDown(void* screen, int key) {
 	struct MenuInputOverlay* s = (struct MenuInputOverlay*)screen;
 	if (Elem_HandlesKeyDown(&s->input.base, key)) return true;
 
-	if (key == KEY_ENTER || key == KEY_KP_ENTER) {
+	if (key == IPT_ENTER || key == IPT_KP_ENTER) {
 		MenuInputOverlay_EnterInput(s); return true;
 	}
 	return Screen_InputDown(screen, key);

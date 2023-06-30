@@ -33,12 +33,18 @@ extern const cc_result ReturnCode_SocketInProgess;
 extern const cc_result ReturnCode_SocketWouldBlock;
 extern const cc_result ReturnCode_DirectoryExists;
 
+/* Whether the launcher and game must both be run in the same process */
+/*  (e.g. can't start a separate process on Mobile or Consoles) */
+extern cc_bool Platform_SingleProcess;
+
 #ifdef CC_BUILD_WIN
-/* Encodes a string in UTF16 format, also null terminating the string. */
-/* Returns the number of bytes written, excluding trailing NULL terminator. */
-int Platform_EncodeUtf16(void* data, const cc_string* src);
-/* Converts a null terminated WCHAR* to char* in-place */
-void Platform_Utf16ToAnsi(void* data);
+typedef struct cc_winstring_ {
+	cc_unichar uni[NATIVE_STR_LEN]; /* String represented using UTF16 format */
+	char ansi[NATIVE_STR_LEN]; /* String lossily represented using ANSI format */
+} cc_winstring;
+/* Encodes a string in UTF16 and ASCII format, also null terminating the string. */
+void Platform_EncodeString(cc_winstring* dst, const cc_string* src);
+
 cc_bool Platform_DescribeErrorExt(cc_result res, cc_string* dst, void* lib);
 #else
 /* Encodes a string in UTF8 format, also null terminating the string. */
@@ -241,8 +247,8 @@ cc_result Socket_CheckWritable(cc_socket s, cc_bool* writable);
 /* Returns non-zero if the given address is valid for a socket to connect to */
 int Socket_ValidAddress(const cc_string* address);
 
-/* Allocates a new non-blocking socket and then begins connecting to the given address:port. */
-cc_result Socket_Connect(cc_socket* s, const cc_string* address, int port);
+/* Allocates a new socket and then begins connecting to the given address:port. */
+cc_result Socket_Connect(cc_socket* s, const cc_string* address, int port, cc_bool nonblocking);
 /* Attempts to read data from the given socket. */
 /* NOTE: A closed socket may set modified to 0, but still return 'success' (i.e. 0) */
 cc_result Socket_Read(cc_socket s, cc_uint8* data, cc_uint32 count, cc_uint32* modified);

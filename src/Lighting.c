@@ -120,7 +120,7 @@ static void ClassicLighting_UpdateLighting(int x, int y, int z, BlockID oldBlock
 			classic_heightmap[index] = y - newOffset;
 		} else {
 			/* Part of the column is now visible to light, we don't know how exactly how high it should be though. */
-			/* However, we know that if the old block was above or equal to light height, then the new light height must be <= old block.y */
+			/* However, we know that if the block Y was above or equal to old light height, then the new light height must be <= block Y */
 			ClassicLighting_CalcHeightAt(x, y, z, index);
 		}
 	} else if (y == lightH && oldOffset == 0) {
@@ -154,7 +154,7 @@ static cc_bool ClassicLighting_NeedsNeighour(BlockID block, int i, int minY, int
 	cc_bool affected;
 
 #ifndef EXTENDED_BLOCKS
-	Lighting_NeedsNeighourBody(World.Blocks[i]);
+	ClassicLighting_NeedsNeighourBody(World.Blocks[i]);
 #else
 	if (World.IDMask <= 0xFF) {
 		ClassicLighting_NeedsNeighourBody(World.Blocks[i]);

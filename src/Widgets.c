@@ -4,8 +4,6 @@
 #include "ExtMath.h"
 #include "Funcs.h"
 #include "Window.h"
-#include "Inventory.h"
-#include "IsometricDrawer.h"
 #include "Utils.h"
 #include "Model.h"
 #include "Screens.h"
@@ -403,13 +401,15 @@ static void HotbarWidget_RenderHotbarOutline(struct HotbarWidget* w) {
 	Gfx_Draw2DTexture(&w->selTex, PACKEDCOL_WHITE);
 }
 
+#define HOTBAR_MAX_VERTICES (INVENTORY_BLOCKS_PER_HOTBAR * ISOMETRICDRAWER_MAXVERTICES)
 static void HotbarWidget_RenderHotbarBlocks(struct HotbarWidget* w) {
 	/* TODO: Should hotbar use its own VB? */
-	struct VertexTextured vertices[INVENTORY_BLOCKS_PER_HOTBAR * ISOMETRICDRAWER_MAXVERTICES];
+	struct VertexTextured vertices[HOTBAR_MAX_VERTICES];
+	int state[HOTBAR_MAX_VERTICES / 4];
 	float scale;
 	int i, x, y;
 
-	IsometricDrawer_BeginBatch(vertices, Models.Vb);
+	IsometricDrawer_BeginBatch(vertices, state);
 	scale = w->elemSize / 2.0f;
 
 	for (i = 0; i < INVENTORY_BLOCKS_PER_HOTBAR; i++) {
@@ -419,9 +419,9 @@ static void HotbarWidget_RenderHotbarBlocks(struct HotbarWidget* w) {
 #ifdef CC_BUILD_TOUCH
 		if (i == HOTBAR_MAX_INDEX && Input_TouchMode) continue;
 #endif
-		IsometricDrawer_DrawBatch(Inventory_Get(i), scale, x, y);
+		IsometricDrawer_AddBatch(Inventory_Get(i), scale, x, y);
 	}
-	IsometricDrawer_EndBatch();
+	IsometricDrawer_EndBatch(Models.Vb);
 }
 
 static int HotbarWidget_ScrolledIndex(struct HotbarWidget* w, float delta, int index, int dir) {
@@ -634,10 +634,8 @@ void HotbarWidget_SetFont(struct HotbarWidget* w, struct FontDesc* font) {
 *#########################################################################################################################*/
 static int Table_X(struct TableWidget* w)      { return w->x - w->paddingL; }
 static int Table_Y(struct TableWidget* w)      { return w->y - w->paddingT; }
-static int Table_Width(struct TableWidget* w)  { return w->width + w->paddingL + w->paddingR; }
+static int Table_Width(struct TableWidget* w)  { return w->width  + w->paddingL + w->paddingR; }
 static int Table_Height(struct TableWidget* w) { return w->height + w->paddingT + w->paddingB; }
-
-#define TABLE_MAX_VERTICES (8 * 10 * ISOMETRICDRAWER_MAXVERTICES)
 
 static cc_bool TableWidget_GetCoords(struct TableWidget* w, int i, int* cellX, int* cellY) {
 	int x, y;
@@ -700,6 +698,7 @@ void TableWidget_RecreateBlocks(struct TableWidget* w) {
 static void TableWidget_Render(void* widget, double delta) {
 	struct TableWidget* w = (struct TableWidget*)widget;
 	struct VertexTextured vertices[TABLE_MAX_VERTICES];
+	int state[TABLE_MAX_VERTICES / 4];
 	int cellSizeX, cellSizeY, size;
 	float off;
 	int i, x, y;
@@ -732,14 +731,14 @@ static void TableWidget_Render(void* widget, double delta) {
 	}
 	Gfx_SetVertexFormat(VERTEX_FORMAT_TEXTURED);
 
-	IsometricDrawer_BeginBatch(vertices, w->vb);
+	IsometricDrawer_BeginBatch(vertices, state);
 	for (i = 0; i < w->blocksCount; i++) {
 		if (!TableWidget_GetCoords(w, i, &x, &y)) continue;
 
 		/* We want to always draw the selected block on top of others */
 		/* TODO: Need two size arguments, in case X/Y dpi differs */
 		if (i == w->selectedIndex) continue;
-		IsometricDrawer_DrawBatch(w->blocks[i],
+		IsometricDrawer_AddBatch(w->blocks[i],
 			w->normBlockSize, x + cellSizeX / 2, y + cellSizeY / 2);
 	}
 
@@ -747,21 +746,16 @@ static void TableWidget_Render(void* widget, double delta) {
 	if (i != -1) {
 		TableWidget_GetCoords(w, i, &x, &y);
 
-		IsometricDrawer_DrawBatch(w->blocks[i],
+		IsometricDrawer_AddBatch(w->blocks[i],
 			w->selBlockSize, x + cellSizeX / 2, y + cellSizeY / 2);
 	}
-	IsometricDrawer_EndBatch();
+	IsometricDrawer_EndBatch(w->vb);
 }
 
-static void TableWidget_Free(void* widget) {
-	struct TableWidget* w = (struct TableWidget*)widget;
-	Gfx_DeleteDynamicVb(&w->vb);
-	w->lastCreatedIndex = -1000;
-}
+static void TableWidget_Free(void* widget) { }
 
 void TableWidget_Recreate(struct TableWidget* w) {
-	Elem_Free(w);
-	Gfx_RecreateDynamicVb(&w->vb, VERTEX_FORMAT_TEXTURED, TABLE_MAX_VERTICES);
+	w->lastCreatedIndex = -1000;
 	TableWidget_RecreateTitle(w);
 }
 
@@ -887,13 +881,13 @@ static int TableWidget_KeyDown(void* widget, int key) {
 	struct TableWidget* w = (struct TableWidget*)widget;
 	if (w->selectedIndex == -1) return false;
 
-	if (key == KEY_LEFT || key == KEY_KP4) {
+	if (key == IPT_LEFT || key == IPT_KP4) {
 		TableWidget_ScrollRelative(w, -1);
-	} else if (key == KEY_RIGHT || key == KEY_KP6) {
+	} else if (key == IPT_RIGHT || key == IPT_KP6) {
 		TableWidget_ScrollRelative(w, 1);
-	} else if (key == KEY_UP || key == KEY_KP8) {
+	} else if (key == IPT_UP || key == IPT_KP8) {
 		TableWidget_ScrollRelative(w, -w->blocksPerRow);
-	} else if (key == KEY_DOWN || key == KEY_KP2) {
+	} else if (key == IPT_DOWN || key == IPT_KP2) {
 		TableWidget_ScrollRelative(w, w->blocksPerRow);
 	} else {
 		return false;
@@ -1152,7 +1146,7 @@ static void InputWidget_DeleteChar(struct InputWidget* w) {
 static void InputWidget_BackspaceKey(struct InputWidget* w) {
 	int i, len;
 
-	if (Key_IsActionPressed()) {
+	if (Input_IsActionPressed()) {
 		if (w->caretPos == -1) { w->caretPos = w->text.length - 1; }
 		len = WordWrap_GetBackLength(&w->text, w->caretPos);
 		if (!len) return;
@@ -1186,7 +1180,7 @@ static void InputWidget_DeleteKey(struct InputWidget* w) {
 }
 
 static void InputWidget_LeftKey(struct InputWidget* w) {
-	if (Key_IsActionPressed()) {
+	if (Input_IsActionPressed()) {
 		if (w->caretPos == -1) { w->caretPos = w->text.length - 1; }
 		w->caretPos -= WordWrap_GetBackLength(&w->text, w->caretPos);
 		InputWidget_UpdateCaret(w);
@@ -1202,7 +1196,7 @@ static void InputWidget_LeftKey(struct InputWidget* w) {
 }
 
 static void InputWidget_RightKey(struct InputWidget* w) {
-	if (Key_IsActionPressed()) {
+	if (Input_IsActionPressed()) {
 		w->caretPos += WordWrap_GetForwardLength(&w->text, w->caretPos);
 		if (w->caretPos >= w->text.length) { w->caretPos = -1; }
 		InputWidget_UpdateCaret(w);
@@ -1287,17 +1281,17 @@ static void InputWidget_Reposition(void* widget) {
 
 static int InputWidget_KeyDown(void* widget, int key) {
 	struct InputWidget* w = (struct InputWidget*)widget;
-	if (key == KEY_LEFT) {
+	if (key == IPT_LEFT) {
 		InputWidget_LeftKey(w);
-	} else if (key == KEY_RIGHT) {
+	} else if (key == IPT_RIGHT) {
 		InputWidget_RightKey(w);
-	} else if (key == KEY_BACKSPACE) {
+	} else if (key == IPT_BACKSPACE) {
 		InputWidget_BackspaceKey(w);
-	} else if (key == KEY_DELETE) {
+	} else if (key == IPT_DELETE) {
 		InputWidget_DeleteKey(w);
-	} else if (key == KEY_HOME) {
+	} else if (key == IPT_HOME) {
 		InputWidget_HomeKey(w);
-	} else if (key == KEY_END) {
+	} else if (key == IPT_END) {
 		InputWidget_EndKey(w);
 	} else if (!InputWidget_OtherKey(w, key)) {
 		return false;
@@ -1725,7 +1719,7 @@ static void ChatInputWidget_UpKey(struct InputWidget* w) {
 	cc_string prevInput;
 	int pos;
 
-	if (Key_IsActionPressed()) {
+	if (Input_IsActionPressed()) {
 		pos = w->caretPos == -1 ? w->text.length : w->caretPos;
 		if (pos < INPUTWIDGET_LEN) return;
 
@@ -1754,7 +1748,7 @@ static void ChatInputWidget_DownKey(struct InputWidget* w) {
 	struct ChatInputWidget* W = (struct ChatInputWidget*)w;
 	cc_string prevInput;
 
-	if (Key_IsActionPressed()) {
+	if (Input_IsActionPressed()) {
 		if (w->caretPos == -1) return;
 
 		w->caretPos += INPUTWIDGET_LEN;
@@ -1843,9 +1837,9 @@ static void ChatInputWidget_TabKey(struct InputWidget* w) {
 
 static int ChatInputWidget_KeyDown(void* widget, int key) {
 	struct InputWidget* w = (struct InputWidget*)widget;
-	if (key == KEY_TAB)  { ChatInputWidget_TabKey(w);  return true; }
-	if (key == KEY_UP)   { ChatInputWidget_UpKey(w);   return true; }
-	if (key == KEY_DOWN) { ChatInputWidget_DownKey(w); return true; }
+	if (key == IPT_TAB)  { ChatInputWidget_TabKey(w);  return true; }
+	if (key == IPT_UP)   { ChatInputWidget_UpKey(w);   return true; }
+	if (key == IPT_DOWN) { ChatInputWidget_DownKey(w); return true; }
 	return InputWidget_KeyDown(w, key);
 }
 

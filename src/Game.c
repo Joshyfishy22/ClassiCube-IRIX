@@ -36,6 +36,8 @@
 #include "Protocol.h"
 #include "Picking.h"
 #include "Animations.h"
+#include "SystemFonts.h"
+#include "Formats.h"
 
 struct _GameData Game;
 cc_uint64 Game_FrameStart;
@@ -135,7 +137,7 @@ void Game_CycleViewDistance(void) {
 	const short* dists = Gui.ClassicMenu ? classicDists : normDists;
 	int count = Gui.ClassicMenu ? Array_Elems(classicDists) : Array_Elems(normDists);
 
-	if (Key_IsShiftPressed()) {
+	if (Input_IsShiftPressed()) {
 		CycleViewDistanceBackwards(dists, count);
 	} else {
 		CycleViewDistanceForwards(dists, count);
@@ -388,6 +390,7 @@ static void Game_Load(void) {
 	Game_AddComponent(&Gfx_Component);
 	Game_AddComponent(&Blocks_Component);
 	Game_AddComponent(&Drawer2D_Component);
+	Game_AddComponent(&SystemFonts_Component);
 
 	Game_AddComponent(&Chat_Component);
 	Game_AddComponent(&Particles_Component);
@@ -412,6 +415,7 @@ static void Game_Load(void) {
 	Game_AddComponent(&PickedPosRenderer_Component);
 	Game_AddComponent(&Audio_Component);
 	Game_AddComponent(&AxisLinesRenderer_Component);
+	Game_AddComponent(&Formats_Component);
 
 	LoadPlugins();
 	for (comp = comps_head; comp; comp = comp->next) {
@@ -493,6 +497,7 @@ static void Game_Render3D(double delta, float t) {
 
 	Selections_Render();
 	Entities_RenderHoveredNames();
+	Camera_KeyLookUpdate();
 	InputHandler_Tick();
 	if (!Game_HideGui) HeldBlockRenderer_Render(delta);
 }
@@ -665,9 +670,9 @@ cc_bool Game_ShouldClose(void) {
 	}
 
 	/* Try to intercept Ctrl+W or Cmd+W for multiplayer */
-	if (Key_IsCtrlPressed() || Key_IsWinPressed()) return false;
+	if (Input_IsCtrlPressed() || Input_IsWinPressed()) return false;
 	/* Also try to intercept mouse back button (Mouse4) */
-	return !Input_Pressed[KEY_XBUTTON1];
+	return !Input_Pressed[IPT_XBUTTON1];
 }
 #else
 static void Game_RunLoop(void) {

@@ -53,31 +53,31 @@ static cc_bool is_ansiWindow, grabCursor;
 static int windowX, windowY;
 
 static const cc_uint8 key_map[14 * 16] = {
-	0, 0, 0, 0, 0, 0, 0, 0, KEY_BACKSPACE, KEY_TAB, 0, 0, 0, KEY_ENTER, 0, 0,
-	0, 0, 0, KEY_PAUSE, KEY_CAPSLOCK, 0, 0, 0, 0, 0, 0, KEY_ESCAPE, 0, 0, 0, 0,
-	KEY_SPACE, KEY_PAGEUP, KEY_PAGEDOWN, KEY_END, KEY_HOME, KEY_LEFT, KEY_UP, KEY_RIGHT, KEY_DOWN, 0, KEY_PRINTSCREEN, 0, KEY_PRINTSCREEN, KEY_INSERT, KEY_DELETE, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, IPT_BACKSPACE, IPT_TAB, 0, 0, 0, IPT_ENTER, 0, 0,
+	0, 0, 0, IPT_PAUSE, IPT_CAPSLOCK, 0, 0, 0, 0, 0, 0, IPT_ESCAPE, 0, 0, 0, 0,
+	IPT_SPACE, IPT_PAGEUP, IPT_PAGEDOWN, IPT_END, IPT_HOME, IPT_LEFT, IPT_UP, IPT_RIGHT, IPT_DOWN, 0, IPT_PRINTSCREEN, 0, IPT_PRINTSCREEN, IPT_INSERT, IPT_DELETE, 0,
 	'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 0, 0, 0, 0, 0, 0,
 	0, 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O',
-	'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', KEY_LWIN, KEY_RWIN, KEY_MENU, 0, 0,
-	KEY_KP0, KEY_KP1, KEY_KP2, KEY_KP3, KEY_KP4, KEY_KP5, KEY_KP6, KEY_KP7, KEY_KP8, KEY_KP9, KEY_KP_MULTIPLY, KEY_KP_PLUS, 0, KEY_KP_MINUS, KEY_KP_DECIMAL, KEY_KP_DIVIDE,
-	KEY_F1, KEY_F2, KEY_F3, KEY_F4, KEY_F5, KEY_F6, KEY_F7, KEY_F8, KEY_F9, KEY_F10, KEY_F11, KEY_F12, KEY_F13, KEY_F14, KEY_F15, KEY_F16,
-	KEY_F17, KEY_F18, KEY_F19, KEY_F20, KEY_F21, KEY_F22, KEY_F23, KEY_F24, 0, 0, 0, 0, 0, 0, 0, 0,
-	KEY_NUMLOCK, KEY_SCROLLLOCK, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	KEY_LSHIFT, KEY_RSHIFT, KEY_LCTRL, KEY_RCTRL, KEY_LALT, KEY_RALT, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, KEY_SEMICOLON, KEY_EQUALS, KEY_COMMA, KEY_MINUS, KEY_PERIOD, KEY_SLASH,
-	KEY_TILDE, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, KEY_LBRACKET, KEY_BACKSLASH, KEY_RBRACKET, KEY_QUOTE, 0,
+	'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', IPT_LWIN, IPT_RWIN, IPT_MENU, 0, 0,
+	IPT_KP0, IPT_KP1, IPT_KP2, IPT_KP3, IPT_KP4, IPT_KP5, IPT_KP6, IPT_KP7, IPT_KP8, IPT_KP9, IPT_KP_MULTIPLY, IPT_KP_PLUS, 0, IPT_KP_MINUS, IPT_KP_DECIMAL, IPT_KP_DIVIDE,
+	IPT_F1, IPT_F2, IPT_F3, IPT_F4, IPT_F5, IPT_F6, IPT_F7, IPT_F8, IPT_F9, IPT_F10, IPT_F11, IPT_F12, IPT_F13, IPT_F14, IPT_F15, IPT_F16,
+	IPT_F17, IPT_F18, IPT_F19, IPT_F20, IPT_F21, IPT_F22, IPT_F23, IPT_F24, 0, 0, 0, 0, 0, 0, 0, 0,
+	IPT_NUMLOCK, IPT_SCROLLLOCK, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	IPT_LSHIFT, IPT_RSHIFT, IPT_LCTRL, IPT_RCTRL, IPT_LALT, IPT_RALT, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, IPT_SEMICOLON, IPT_EQUALS, IPT_COMMA, IPT_MINUS, IPT_PERIOD, IPT_SLASH,
+	IPT_TILDE, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, IPT_LBRACKET, IPT_BACKSLASH, IPT_RBRACKET, IPT_QUOTE, 0,
 };
 static int MapNativeKey(WPARAM key, LPARAM meta) {
 	LPARAM ext = meta & (1UL << 24);
 	switch (key)
 	{
 	case VK_CONTROL:
-		return ext ? KEY_RCTRL : KEY_LCTRL;
+		return ext ? IPT_RCTRL : IPT_LCTRL;
 	case VK_MENU:
-		return ext ? KEY_RALT  : KEY_LALT;
+		return ext ? IPT_RALT  : IPT_LALT;
 	case VK_RETURN:
-		return ext ? KEY_KP_ENTER : KEY_ENTER;
+		return ext ? IPT_KP_ENTER : IPT_ENTER;
 	default:
 		return key < Array_Elems(key_map) ? key_map[key] : 0;
 	}
@@ -147,10 +147,10 @@ static LRESULT CALLBACK Window_Procedure(HWND handle, UINT message, WPARAM wPara
 
 	case WM_MOUSEMOVE:
 		/* Set before position change, in case mouse buttons changed when outside window */
-		if (!(wParam & 0x01)) Input_SetReleased(KEY_LMOUSE);
-		//Input_SetNonRepeatable(KEY_LMOUSE, wParam & 0x01);
-		Input_SetNonRepeatable(KEY_RMOUSE, wParam & 0x02);
-		Input_SetNonRepeatable(KEY_MMOUSE, wParam & 0x10);
+		if (!(wParam & 0x01)) Input_SetReleased(IPT_LMOUSE);
+		//Input_SetNonRepeatable(IPT_LMOUSE, wParam & 0x01);
+		Input_SetNonRepeatable(IPT_RMOUSE, wParam & 0x02);
+		Input_SetNonRepeatable(IPT_MMOUSE, wParam & 0x10);
 		/* TODO: do we need to set XBUTTON1/XBUTTON2 here */
 		Pointer_SetPosition(0, LOWORD(lParam), HIWORD(lParam));
 		break;
@@ -161,23 +161,23 @@ static LRESULT CALLBACK Window_Procedure(HWND handle, UINT message, WPARAM wPara
 		return 0;
 
 	case WM_LBUTTONDOWN:
-		Input_SetPressed(KEY_LMOUSE); break;
+		Input_SetPressed(IPT_LMOUSE); break;
 	case WM_MBUTTONDOWN:
-		Input_SetPressed(KEY_MMOUSE); break;
+		Input_SetPressed(IPT_MMOUSE); break;
 	case WM_RBUTTONDOWN:
-		Input_SetPressed(KEY_RMOUSE); break;
+		Input_SetPressed(IPT_RMOUSE); break;
 	case WM_XBUTTONDOWN:
-		Input_SetPressed(HIWORD(wParam) == 1 ? KEY_XBUTTON1 : KEY_XBUTTON2);
+		Input_SetPressed(HIWORD(wParam) == 1 ? IPT_XBUTTON1 : IPT_XBUTTON2);
 		break;
 
 	case WM_LBUTTONUP:
-		Input_SetReleased(KEY_LMOUSE); break;
+		Input_SetReleased(IPT_LMOUSE); break;
 	case WM_MBUTTONUP:
-		Input_SetReleased(KEY_MMOUSE); break;
+		Input_SetReleased(IPT_MMOUSE); break;
 	case WM_RBUTTONUP:
-		Input_SetReleased(KEY_RMOUSE); break;
+		Input_SetReleased(IPT_RMOUSE); break;
 	case WM_XBUTTONUP:
-		Input_SetReleased(HIWORD(wParam) == 1 ? KEY_XBUTTON1 : KEY_XBUTTON2);
+		Input_SetReleased(HIWORD(wParam) == 1 ? IPT_XBUTTON1 : IPT_XBUTTON2);
 		break;
 
 	case WM_INPUT:
@@ -235,8 +235,8 @@ static LRESULT CALLBACK Window_Procedure(HWND handle, UINT message, WPARAM wPara
 			rShiftDown = ((USHORT)GetKeyState(VK_RSHIFT)) >> 15;
 
 			if (!pressed || lShiftDown != rShiftDown) {
-				Input_Set(KEY_LSHIFT, lShiftDown);
-				Input_Set(KEY_RSHIFT, rShiftDown);
+				Input_Set(IPT_LSHIFT, lShiftDown);
+				Input_Set(IPT_RSHIFT, rShiftDown);
 			}
 		} else {
 			key = MapNativeKey(wParam, lParam);
@@ -369,13 +369,12 @@ void Window_Create2D(int width, int height) { DoCreateWindow(width, height); }
 void Window_Create3D(int width, int height) { DoCreateWindow(width, height); }
 
 void Window_SetTitle(const cc_string* title) {
-	WCHAR str[NATIVE_STR_LEN];
-	Platform_EncodeUtf16(str, title);
-	if (SetWindowTextW(win_handle, str)) return;
+	cc_winstring str;
+	Platform_EncodeString(&str, title);
+	if (SetWindowTextW(win_handle, str.uni)) return;
 
 	/* Windows 9x does not support W API functions */
-	Platform_Utf16ToAnsi(str);
-	SetWindowTextA(win_handle, (const char*)str);
+	SetWindowTextA(win_handle, str.ansi);
 }
 
 void Clipboard_GetText(cc_string* value) {
@@ -558,28 +557,51 @@ static void ShowDialogCore(const char* title, const char* msg) {
 static cc_result OpenSaveFileDialog(const cc_string* filters, FileDialogCallback callback, cc_bool load,
 									const char* const* fileExts, const cc_string* defaultName) {
 	cc_string path; char pathBuffer[NATIVE_STR_LEN];
-	WCHAR str[MAX_PATH] = { 0 };
-	OPENFILENAMEW ofn   = { 0 };
-	WCHAR filter[MAX_PATH];
+	cc_winstring str  = { 0 };
+	OPENFILENAMEW ofn = { 0 };
+	cc_winstring filter;
+	cc_result res;
 	BOOL ok;
 	int i;
 
-	Platform_EncodeUtf16(str, defaultName);
-	Platform_EncodeUtf16(filter, filters);
-	ofn.lStructSize  = sizeof(ofn);
+	Platform_EncodeString(&str, defaultName);
+	Platform_EncodeString(&filter, filters);
+	/* NOTE: OPENFILENAME_SIZE_VERSION_400 is used instead of sizeof(OFN), because the size of */
+	/*  OPENFILENAME increased after Windows 9x/NT4 with the addition of pvReserved and later fields */
+	/* (and Windows 9x/NT4 return an error if a lStructSize > OPENFILENAME_SIZE_VERSION_400 is used) */
+	ofn.lStructSize  = OPENFILENAME_SIZE_VERSION_400;
+	/* also note that this only works when you *don't* have OFN_HOOK in Flags - if you do, then */
+	/*  on modern Windows versions the dialogs are altered to show an old Win 9x style appearance */
+	/* (see https://github.com/geany/geany/issues/578 for example of this problem) */
+
 	ofn.hwndOwner    = win_handle;
-	ofn.lpstrFile    = str;
+	ofn.lpstrFile    = str.uni;
 	ofn.nMaxFile     = MAX_PATH;
-	ofn.lpstrFilter  = filter;
+	ofn.lpstrFilter  = filter.uni;
 	ofn.nFilterIndex = 1;
 	ofn.Flags = OFN_NOCHANGEDIR | OFN_PATHMUSTEXIST | (load ? OFN_FILEMUSTEXIST : OFN_OVERWRITEPROMPT);
 
-	ok = load ? GetOpenFileNameW(&ofn) : GetSaveFileNameW(&ofn);
-	if (!ok) return CommDlgExtendedError();
 	String_InitArray(path, pathBuffer);
+	ok = load ? GetOpenFileNameW(&ofn) : GetSaveFileNameW(&ofn);
+	
+	if (ok) {
+		/* Successfully got a unicode filesystem path */
+		for (i = 0; i < MAX_PATH && str.uni[i]; i++) {
+			String_Append(&path, Convert_CodepointToCP437(str.uni[i]));
+		}
+	} else if ((res = CommDlgExtendedError()) == 2) {
+		/* CDERR_INITIALIZATION - probably running on Windows 9x */
+		ofn.lpstrFile   = str.ansi;
+		ofn.lpstrFilter = filter.ansi;
 
-	for (i = 0; i < MAX_PATH && str[i]; i++) {
-		String_Append(&path, Convert_CodepointToCP437(str[i]));
+		ok = load ? GetOpenFileNameA(&ofn) : GetSaveFileNameA(&ofn);
+		if (!ok) return CommDlgExtendedError();
+
+		for (i = 0; i < MAX_PATH && str.ansi[i]; i++) {
+			String_Append(&path, str.ansi[i]);
+		}
+	} else {
+		return res;
 	}
 
 	/* Add default file extension if user didn't provide one */
@@ -723,14 +745,11 @@ static void GLContext_SelectGraphicsMode(struct GraphicsMode* mode) {
 	pfd.nVersion = 1;
 	pfd.dwFlags  = PFD_SUPPORT_OPENGL | PFD_DRAW_TO_WINDOW | PFD_DOUBLEBUFFER;
 	/* TODO: PFD_SUPPORT_COMPOSITION FLAG? CHECK IF IT WORKS ON XP */
+
 	pfd.cColorBits = mode->R + mode->G + mode->B;
 	pfd.cDepthBits = GLCONTEXT_DEFAULT_DEPTH;
-
 	pfd.iPixelType = PFD_TYPE_RGBA;
-	pfd.cRedBits   = mode->R; // TODO unnecessary??
-	pfd.cGreenBits = mode->G;
-	pfd.cBlueBits  = mode->B;
-	pfd.cAlphaBits = mode->A;
+	pfd.cAlphaBits = mode->A; /* TODO not needed? test on Intel */
 
 	modeIndex = ChoosePixelFormat(win_DC, &pfd);
 	if (modeIndex == 0) { Logger_Abort("Requested graphics mode not available"); }
@@ -739,6 +758,7 @@ static void GLContext_SelectGraphicsMode(struct GraphicsMode* mode) {
 	pfd.nSize = sizeof(PIXELFORMATDESCRIPTOR);
 	pfd.nVersion = 1;
 
+	/* TODO DescribePixelFormat might be unnecessary? */
 	DescribePixelFormat(win_DC, modeIndex, pfd.nSize, &pfd);
 	if (!SetPixelFormat(win_DC, modeIndex, &pfd)) {
 		Logger_Abort2(GetLastError(), "SetPixelFormat failed");

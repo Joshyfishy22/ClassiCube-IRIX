@@ -117,37 +117,6 @@ typedef cc_uint8  cc_bool;
 #endif
 #endif
 
-#define EXTENDED_BLOCKS
-#ifdef EXTENDED_BLOCKS
-typedef cc_uint16 BlockID;
-#else
-typedef cc_uint8 BlockID;
-#endif
-
-#define EXTENDED_TEXTURES
-#ifdef EXTENDED_TEXTURES
-typedef cc_uint16 TextureLoc;
-#else
-typedef cc_uint8 TextureLoc;
-#endif
-
-typedef cc_uint8 BlockRaw;
-typedef cc_uint8 EntityID;
-typedef cc_uint8 Face;
-typedef cc_uint32 cc_result;
-typedef cc_uint64 TimeMS;
-
-typedef struct Rect2D_  { int X, Y, Width, Height; } Rect2D;
-typedef struct TextureRec_ { float U1, V1, U2, V2; } TextureRec;
-
-typedef struct cc_string_ {
-	char* buffer;       /* Pointer to characters, NOT NULL TERMINATED */
-	cc_uint16 length;   /* Number of characters used */
-	cc_uint16 capacity; /* Max number of characters  */
-} cc_string;
-/* Indicates that a reference to the buffer in a string argument is persisted after the function has completed.
-Thus it is **NOT SAFE** to allocate a string on the stack. */
-#define STRING_REF
 
 #define CC_BUILD_FREETYPE
 /*#define CC_BUILD_GL11*/
@@ -175,11 +144,6 @@ Thus it is **NOT SAFE** to allocate a string on the stack. */
 #define CC_BUILD_SDL
 #define CC_BUILD_CURL
 #define CC_BUILD_OPENAL
-#elif defined __psp__
-#define CC_BUILD_POSIX
-#define CC_BUILD_CURL
-#define CC_BUILD_OPENAL
-#define CC_BUILD_PSP
 #elif defined __linux__
 #define CC_BUILD_LINUX
 #define CC_BUILD_POSIX
@@ -255,6 +219,12 @@ Thus it is **NOT SAFE** to allocate a string on the stack. */
 #define CC_BUILD_GL
 #define CC_BUILD_CURL
 #define CC_BUILD_OPENAL
+#elif defined __BEOS__
+#define CC_BUILD_HAIKU
+#define CC_BUILD_POSIX
+#define CC_BUILD_GL
+#define CC_BUILD_CURL
+#define CC_BUILD_OPENAL
 #elif defined __sgi
 #define CC_BUILD_IRIX
 #define CC_BUILD_POSIX
@@ -273,15 +243,69 @@ Thus it is **NOT SAFE** to allocate a string on the stack. */
 #define CC_BUILD_NOMUSIC
 #define CC_BUILD_MINFILES
 #undef  CC_BUILD_FREETYPE
+#elif defined __psp__
+#define CC_BUILD_HTTPCLIENT
+#define CC_BUILD_OPENAL
+#define CC_BUILD_PSP
+#define CC_BUILD_LOWMEM
+#undef CC_BUILD_FREETYPE
+#elif defined __3DS__
+#define CC_BUILD_HTTPCLIENT
+#define CC_BUILD_OPENAL
+#define CC_BUILD_3DS
+#define CC_BUILD_LOWMEM
+#undef CC_BUILD_FREETYPE
+#elif defined GEKKO
+#define CC_BUILD_HTTPCLIENT
+#define CC_BUILD_OPENAL
+#define CC_BUILD_GCWII
+#define CC_BUILD_LOWMEM
+#undef CC_BUILD_FREETYPE
 #endif
 #endif
 
-#if defined CC_BUILD_D3D9 || defined CC_BUILD_D3D11
-typedef void* GfxResourceID;
+
+#ifndef CC_BUILD_LOWMEM
+#define EXTENDED_BLOCKS
+#endif
+#define EXTENDED_TEXTURES
+
+#ifdef EXTENDED_BLOCKS
+typedef cc_uint16 BlockID;
 #else
-/* Ensure size is same as D3D9, even though only 32 bits are used */
-/* NOTE: OpenGL 1.1 does actually use the full 64 bits for 'dynamic' vertex buffers */
+typedef cc_uint8 BlockID;
+#endif
+
+#ifdef EXTENDED_TEXTURES
+typedef cc_uint16 TextureLoc;
+#else
+typedef cc_uint8 TextureLoc;
+#endif
+
+typedef cc_uint8 BlockRaw;
+typedef cc_uint8 EntityID;
+typedef cc_uint8 Face;
+typedef cc_uint32 cc_result;
+typedef cc_uint64 TimeMS;
+
+typedef struct Rect2D_  { int X, Y, Width, Height; } Rect2D;
+typedef struct TextureRec_ { float U1, V1, U2, V2; } TextureRec;
+
+typedef struct cc_string_ {
+	char* buffer;       /* Pointer to characters, NOT NULL TERMINATED */
+	cc_uint16 length;   /* Number of characters used */
+	cc_uint16 capacity; /* Max number of characters  */
+} cc_string;
+/* Indicates that a reference to the buffer in a string argument is persisted after the function has completed.
+Thus it is **NOT SAFE** to allocate a string on the stack. */
+#define STRING_REF
+
+#if defined CC_BUILD_GL
+/* NOTE: Although normally OpenGL object/resource IDs are 32 bit integers, */
+/*  OpenGL 1.1 does actually use the full 64 bits for 'dynamic' vertex buffers */
 typedef cc_uintptr GfxResourceID;
+#else
+typedef void* GfxResourceID;
 #endif
 
 /* Contains the information to describe a 2D textured quad. */

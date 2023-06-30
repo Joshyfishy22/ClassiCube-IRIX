@@ -20,6 +20,7 @@
 #include "Options.h"
 #include "LBackend.h"
 #include "PackedCol.h"
+#include "SystemFonts.h"
 
 struct LScreen* Launcher_Active;
 cc_bool Launcher_ShouldExit, Launcher_ShouldUpdate;
@@ -60,7 +61,8 @@ void Launcher_DisplayHttpError(struct HttpRequest* req, const char* action, cc_s
 	if (res) {
 		/* Non HTTP error - this is not good */
 		Http_LogError(action, req);
-		String_Format2(dst, "&cError %i when %c", &res, action);
+		String_Format2(dst, res >= 0x80000000 ? "&cError %h when %c" : "&cError %i when %c",
+						&res, action);
 	} else if (status != 200) {
 		String_Format2(dst, "&c%i error when %c", &status, action);
 	} else {
@@ -107,11 +109,7 @@ cc_bool Launcher_StartGame(const cc_string* user, const cc_string* mppass, const
 	res = Process_StartGame2(args, numArgs);
 	if (res) { Logger_SysWarn(res, "starting game"); return false; }
 
-#ifdef CC_BUILD_MOBILE
-	Launcher_ShouldExit = true;
-#else
-	Launcher_ShouldExit = Options_GetBool(LOPT_AUTO_CLOSE, false);
-#endif
+	Launcher_ShouldExit = Platform_SingleProcess || Options_GetBool(LOPT_AUTO_CLOSE, false);
 	return true;
 }
 
@@ -172,11 +170,11 @@ static void OnResize(void* obj) {
 }
 
 static cc_bool IsShutdown(int key) {
-	if (key == KEY_F4 && Key_IsAltPressed()) return true;
+	if (key == IPT_F4 && Input_IsAltPressed()) return true;
 
 	/* On macOS, Cmd+Q should also end the process */
 #ifdef CC_BUILD_DARWIN
-	return key == 'Q' && Key_IsWinPressed();
+	return key == 'Q' && Input_IsWinPressed();
 #else
 	return false;
 #endif
@@ -234,6 +232,7 @@ void Launcher_Run(void) {
 #endif
 
 	Drawer2D_Component.Init();
+	SystemFonts_Component.Init();
 	Drawer2D.BitmappedText    = false;
 	Drawer2D.BlackTextShadows = true;
 
@@ -363,7 +362,7 @@ void Launcher_SaveTheme(void) {
 	SaveColor("launcher-btn-fore-active-col",        Launcher_Theme.ButtonForeActiveColor);
 	SaveColor("launcher-btn-fore-inactive-col",      Launcher_Theme.ButtonForeColor);
 	SaveColor("launcher-btn-highlight-inactive-col", Launcher_Theme.ButtonHighlightColor);
-	Options_SetBool("nostalgia-classicbg",                 Launcher_Theme.ClassicBackground);
+	Options_SetBool("nostalgia-classicbg",           Launcher_Theme.ClassicBackground);
 }
 
 

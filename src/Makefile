@@ -90,6 +90,13 @@ LDFLAGS=-g
 LIBS=-lm -lexecinfo -lGL -lnetwork -lstdc++ -lbe -lgame -ltracker
 endif
 
+ifeq ($(PLAT),beos)
+OBJECTS+=Window_Haiku.o
+CFLAGS=-g -pipe
+LDFLAGS=-g
+LIBS=-lm -lexecinfo -lGL -lnetwork -lstdc++ -lbe -lgame -ltracker
+endif
+
 ifeq ($(PLAT),serenityos)
 LIBS=-lgl -lSDL2
 endif
@@ -102,7 +109,7 @@ endif
 
 ifeq ($(PLAT),psp)
 CC=psp-gcc
-LIBS=-lm -lpspgum -lpspgu -lpspge -lpspdisplay
+LIBS=-lm -lpspgum -lpspgu -lpspge -lpspdisplay -lpspctrl
 endif
 
 ifeq ($(OS),Windows_NT)
@@ -133,13 +140,21 @@ dragonfly:
 	$(MAKE) $(ENAME) PLAT=dragonfly
 haiku:
 	$(MAKE) $(ENAME) PLAT=haiku
+beos:
+	$(MAKE) $(ENAME) PLAT=beos
 serenityos:
 	$(MAKE) $(ENAME) PLAT=serenityos
 irix:
 	$(MAKE) $(ENAME) PLAT=irix
 psp:
 	$(MAKE) ClassiCube.elf PLAT=psp
-
+3ds:
+	$(MAKE) -f Makefile_3DS PLAT=3ds
+wii:
+	$(MAKE) -f Makefile_wii PLAT=wii
+gamecube:
+	$(MAKE) -f Makefile_gamecube PLAT=gamecube
+	
 clean:
 	$(DEL) $(OBJECTS)
 

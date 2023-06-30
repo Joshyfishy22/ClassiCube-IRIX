@@ -4,7 +4,7 @@
 #include "_PlatformBase.h"
 #include "Stream.h"
 #include "ExtMath.h"
-#include "Drawer2D.h"
+#include "SystemFonts.h"
 #include "Funcs.h"
 #include "Window.h"
 #include "Utils.h"
@@ -29,16 +29,18 @@
 #include <signal.h>
 #include <stdio.h>
 #include <netdb.h>
-//For IRIX OS
-#ifdef CC_BUILD_IRIX 
-#include <sys/syssgi.h>
-#endif
-#define Socket__Error() errno
+
 const cc_result ReturnCode_FileShareViolation = 1000000000; /* TODO: not used apparently */
 const cc_result ReturnCode_FileNotFound     = ENOENT;
 const cc_result ReturnCode_SocketInProgess  = EINPROGRESS;
 const cc_result ReturnCode_SocketWouldBlock = EWOULDBLOCK;
 const cc_result ReturnCode_DirectoryExists  = EEXIST;
+
+//For IRIX OS
+#ifdef CC_BUILD_IRIX 
+#include <sys/syssgi.h>
+#endif
+#define Socket__Error() errno
 
 /* Operating system specific include files */
 #if defined CC_BUILD_DARWIN
@@ -56,13 +58,6 @@ const cc_result ReturnCode_DirectoryExists  = EEXIST;
 /* TODO: Use load_image/resume_thread instead of fork */
 /* Otherwise opening browser never works because fork fails */
 #include <kernel/image.h>
-#elif defined CC_BUILD_PSP
-/* pspsdk doesn't seem to support IPv6 */
-#undef AF_INET6
-#include <pspkernel.h>
-
-PSP_MODULE_INFO("ClassiCube", PSP_MODULE_USER, 1, 0);
-PSP_MAIN_THREAD_ATTR(PSP_THREAD_ATTR_USER);
 #endif
 
 
@@ -544,8 +539,8 @@ int Socket_ValidAddress(const cc_string* address) {
 	return ParseAddress(&addr, address);
 }
 
-cc_result Socket_Connect(cc_socket* s, const cc_string* address, int port) {
-	int family, addrSize = 0, blocking_raw = -1; /* non-blocking mode */
+cc_result Socket_Connect(cc_socket* s, const cc_string* address, int port, cc_bool nonblocking) {
+	int family, addrSize = 0;
 	union SocketAddress addr;
 	cc_result res;
 
@@ -555,13 +550,11 @@ cc_result Socket_Connect(cc_socket* s, const cc_string* address, int port) {
 
 	*s = socket(family, SOCK_STREAM, IPPROTO_TCP);
 	if (*s == -1) return errno;
-	
-	#if defined CC_BUILD_PSP
-	int on = 1;
-	setsockopt(*s, SOL_SOCKET, SO_NONBLOCK, &on, sizeof(int));
-	#else
-	ioctl(*s, FIONBIO, &blocking_raw);
-	#endif
+
+	if (nonblocking) {
+		int blocking_raw = -1; /* non-blocking mode */
+		ioctl(*s, FIONBIO, &blocking_raw);
+	}
 
 	#ifdef AF_INET6
 	if (family == AF_INET6) {
@@ -597,7 +590,7 @@ void Socket_Close(cc_socket s) {
 	close(s);
 }
 
-#if defined CC_BUILD_DARWIN || defined CC_BUILD_PSP
+#if defined CC_BUILD_DARWIN
 /* poll is broken on old OSX apparently https://daniel.haxx.se/docs/poll-vs-select.html */
 static cc_result Socket_Poll(cc_socket s, int mode, cc_bool* success) {
 	fd_set set;
@@ -638,7 +631,7 @@ cc_result Socket_CheckReadable(cc_socket s, cc_bool* readable) {
 }
 
 cc_result Socket_CheckWritable(cc_socket s, cc_bool* writable) {
-	socklen_t resultSize;
+	socklen_t resultSize = sizeof(socklen_t);
 	cc_result res = Socket_Poll(s, SOCKET_POLL_WRITE, writable);
 	if (res || *writable) return res;
 
@@ -951,18 +944,7 @@ cc_result Updater_SetNewBuildTime(cc_uint64 timestamp) {
 /*########################################################################################################################*
 *-------------------------------------------------------Dynamic lib-------------------------------------------------------*
 *#########################################################################################################################*/
-#if defined CC_BUILD_PSP
-/* TODO can this actually be supported somehow */
-const cc_string DynamicLib_Ext = String_FromConst(".so");
-
-void* DynamicLib_Load2(const cc_string* path)      { return NULL; }
-void* DynamicLib_Get2(void* lib, const char* name) { return NULL; }
-
-cc_bool DynamicLib_DescribeError(cc_string* dst) {
-	String_AppendConst(dst, "Dynamic linking unsupported");
-	return true;
-}
-#elif defined MAC_OS_X_VERSION_MIN_REQUIRED && (MAC_OS_X_VERSION_MIN_REQUIRED < 1040)
+#if defined MAC_OS_X_VERSION_MIN_REQUIRED && (MAC_OS_X_VERSION_MIN_REQUIRED < 1040)
 /* Really old mac OS versions don't have the dlopen/dlsym API */
 const cc_string DynamicLib_Ext = String_FromConst(".dylib");
 
@@ -1095,6 +1077,10 @@ static void Platform_InitSpecific(void) { }
 #endif
 
 void Platform_Init(void) {
+#ifdef CC_BUILD_MOBILE
+	Platform_SingleProcess = true;
+#endif
+
 	Platform_InitPosix();
 	Platform_InitStopwatch();
 	Platform_InitSpecific();

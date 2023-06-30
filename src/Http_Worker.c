@@ -246,8 +246,8 @@ static const char* (APIENTRY *_curl_easy_strerror)(CURLcode res);
 static const cc_string curlLib = String_FromConst("libcurl.dll");
 static const cc_string curlAlt = String_FromConst("curl.dll");
 #elif defined CC_BUILD_DARWIN
-static const cc_string curlLib = String_FromConst("/usr/lib/libcurl.4.dylib");
-static const cc_string curlAlt = String_FromConst("/usr/lib/libcurl.dylib");
+static const cc_string curlLib = String_FromConst("libcurl.4.dylib");
+static const cc_string curlAlt = String_FromConst("libcurl.dylib");
 #elif defined CC_BUILD_NETBSD
 static const cc_string curlLib = String_FromConst("libcurl.so");
 static const cc_string curlAlt = String_FromConst("/usr/pkg/lib/libcurl.so");
@@ -418,6 +418,473 @@ static cc_result HttpBackend_Do(struct HttpRequest* req, cc_string* url) {
 	Mem_Free(post_data);
 	_curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, NULL);
 	return res;
+}
+#elif defined CC_BUILD_HTTPCLIENT
+#include "Errors.h"
+#include "PackedCol.h"
+#include "SSL.h"
+
+/*########################################################################################################################*
+*---------------------------------------------------------HttpUrl---------------------------------------------------------*
+*#########################################################################################################################*/
+/* Components of a URL */
+struct HttpUrl {
+	cc_bool https;      /* Whether HTTPS or just HTTP protocol */
+	cc_string address;  /* Address of server (e.g. "classicube.net:8080") */
+	cc_string resource; /* Path being accessed (and query string) */
+	char _addressBuffer[STRING_SIZE + 8];
+	char _resourceBuffer[STRING_SIZE * 4];
+};
+
+static void HttpUrl_EncodeUrl(cc_string* dst, const cc_string* src) {
+	cc_uint8 data[4];
+	int i, len;
+	char c;
+
+	for (i = 0; i < src->length; i++) {
+		c   = src->buffer[i];
+		len = Convert_CP437ToUtf8(c, data);
+
+		/* URL path/query must not be URL encoded (it normally would be) */
+		if (c == '/' || c == '?' || c == '=') {
+			String_Append(dst, c);
+		} else {
+			Http_UrlEncode(dst, data, len);
+		}
+	}
+}
+
+/* Splits up the components of a URL */
+static void HttpUrl_Parse(const cc_string* src, struct HttpUrl* url) {
+	cc_string scheme, path, addr, resource;
+	/* URL is of form [scheme]://[server host]:[server port]/[resource] */
+	/* For simplicity, parsed as [scheme]://[server address]/[resource] */
+	int idx = String_IndexOfConst(src, "://");
+
+	scheme = idx == -1 ? String_Empty : String_UNSAFE_Substring(src,   0, idx);
+	path   = idx == -1 ? *src         : String_UNSAFE_SubstringAt(src, idx + 3);
+
+	url->https = String_CaselessEqualsConst(&scheme, "https");
+	String_UNSAFE_Separate(&path, '/', &addr, &resource);
+
+	String_InitArray(url->address, url->_addressBuffer);
+	String_Copy(&url->address, &addr);
+
+	String_InitArray(url->resource, url->_resourceBuffer);
+	String_Append(&url->resource, '/');
+	/* Address may have unicode characters - need to percent encode them */
+	HttpUrl_EncodeUrl(&url->resource, &resource);
+}
+
+static cc_result HttpUrl_ResolveRedirect(struct HttpUrl* parts, const cc_string* url) {
+	/* absolute URL */
+	if (String_IndexOfConst(url, "http://") == 0 || String_IndexOfConst(url, "https://") == 0) {		
+		HttpUrl_Parse(url, parts);
+		return 0;
+	} 
+
+	/* Root relative URL */
+	if (url->buffer[0] == '/' && (url->length == 1 || url->buffer[1] != '/')) {
+		parts->resource.length = 0;
+		HttpUrl_EncodeUrl(&parts->resource, url);
+		return 0;
+	}
+
+	/* TODO scheme relative or relative URL or invalid */
+	return HTTP_ERR_RELATIVE;
+}
+
+
+/*########################################################################################################################*
+*------------------------------------------------------HttpConnection-----------------------------------------------------*
+*#########################################################################################################################*/
+struct HttpConnection {
+	cc_socket socket;
+	void* sslCtx;
+};
+
+static cc_result HttpConnection_Open(struct HttpConnection* conn, const struct HttpUrl* url) {
+	cc_string host, port;
+	cc_uint16 portNum;
+	cc_result res;
+
+	/* address can be either "host" or "host:port" */
+	String_UNSAFE_Separate(&url->address, ':', &host, &port);
+	if (!Convert_ParseUInt16(&port, &portNum)) {
+		portNum = url->https ? 443 : 80;
+	}
+
+	conn->socket = 0;
+	conn->sslCtx = NULL;
+	if ((res = Socket_Connect(&conn->socket, &host, portNum, false))) return res;
+
+	if (!url->https) return 0;
+	return SSL_Init(conn->socket, &host, &conn->sslCtx);
+}
+
+static cc_result HttpConnection_Read(struct HttpConnection* conn, cc_uint8* data, cc_uint32 count, cc_uint32* read) {
+	if (conn->sslCtx)
+		return SSL_Read(conn->sslCtx, data, count, read);
+	return Socket_Read(conn->socket,  data, count, read);
+}
+
+static cc_result HttpConnection_Write(struct HttpConnection* conn, const cc_uint8* data, cc_uint32 count, cc_uint32* wrote) {
+	if (conn->sslCtx) 
+		return SSL_Write(conn->sslCtx, data, count, wrote);
+	return Socket_Write(conn->socket,  data, count, wrote);
+}
+
+static void HttpConnection_Close(struct HttpConnection* conn) {
+	if (conn->sslCtx) {
+		SSL_Free(conn->sslCtx);
+		conn->sslCtx = NULL;
+	}
+
+	if (conn->socket) { /* Closing socket 0 will crash on GC/Wii */
+		Socket_Close(conn->socket);
+		conn->socket = 0;
+	}
+}
+
+
+/*########################################################################################################################*
+*--------------------------------------------------------HttpClient-------------------------------------------------------*
+*#########################################################################################################################*/
+enum HTTP_RESPONSE_STATE {
+	HTTP_RESPONSE_STATE_HEADER,
+	HTTP_RESPONSE_STATE_BODY_INIT,
+	HTTP_RESPONSE_STATE_BODY_DATA,
+	HTTP_RESPONSE_STATE_CHUNK_HEADER,
+	HTTP_RESPONSE_STATE_CHUNK_DATA,
+	HTTP_RESPONSE_STATE_CHUNK_END_R,
+	HTTP_RESPONSE_STATE_CHUNK_END_N,
+	HTTP_RESPONSE_STATE_CHUNK_TRAILERS,
+	HTTP_RESPONSE_STATE_DONE
+};
+
+struct HttpClientState {
+	enum HTTP_RESPONSE_STATE state;
+	struct HttpConnection conn;
+	struct HttpRequest* req;
+	int chunked;
+	int chunkRead, chunkLength;
+	cc_string header, location;
+	struct HttpUrl url;
+	char _headerBuffer[256], _locationBuffer[256];
+};
+
+static void HttpClientState_Reset(struct HttpClientState* state) {
+	state->state       = HTTP_RESPONSE_STATE_HEADER;
+	state->chunked     = 0;
+	state->chunkRead   = 0;
+	state->chunkLength = 0;
+	String_InitArray(state->header,   state->_headerBuffer);
+	String_InitArray(state->location, state->_locationBuffer);
+}
+
+static void HttpClientState_Init(struct HttpClientState* state) {
+	HttpClientState_Reset(state);
+}
+
+
+static void HttpClient_Serialise(struct HttpClientState* state) {
+	static const cc_string userAgent = String_FromConst(GAME_APP_NAME);
+	static const char* verbs[3] = { "GET", "HEAD", "POST" };
+
+	struct HttpRequest* req = state->req;
+	cc_string* buffer = (cc_string*)req->meta;
+	/* TODO move to other functions */
+	/* Write request message headers */
+	String_Format2(buffer, "%c %s HTTP/1.1\r\n",
+					verbs[req->requestType], &state->url.resource);
+
+	Http_AddHeader(req, "Host",       &state->url.address);
+	Http_AddHeader(req, "User-Agent", &userAgent);
+	if (req->data) String_Format1(buffer, "Content-Length: %i\r\n", &req->size);
+
+	Http_SetRequestHeaders(req);
+	String_AppendConst(buffer, "\r\n");
+	
+	/* Write request message body */
+	if (req->data) {
+		String_AppendAll(buffer, req->data, req->size);
+		HttpRequest_Free(req);
+	} /* TODO post redirect handling */
+}
+
+static cc_result HttpClient_SendRequest(struct HttpClientState* state) {
+	char inputBuffer[16384];
+	cc_string inputMsg;
+	cc_uint32 wrote;
+
+	String_InitArray(inputMsg, inputBuffer);
+	state->req->meta = &inputMsg;
+	http_curProgress = HTTP_PROGRESS_FETCHING_DATA;
+	HttpClient_Serialise(state);
+
+	/* TODO check that wrote is >= inputMsg.length */
+	return HttpConnection_Write(&state->conn, inputBuffer, inputMsg.length, &wrote);
+}
+
+
+static void HttpClient_ParseHeader(struct HttpClientState* state, const cc_string* line) {
+	cc_string name, value;
+	/* name: value */
+	if (!String_UNSAFE_Separate(line, ':', &name, &value)) return;
+
+	if (String_CaselessEqualsConst(&name, "Transfer-Encoding")) {
+		state->chunked = String_CaselessEqualsConst(&value, "chunked");
+	} else if (String_CaselessEqualsConst(&name, "Location")) {
+		String_Copy(&state->location, &value);
+	}
+}
+
+/* RFC 7230, section 3.3.3 - Message Body Length */
+static cc_bool HttpClient_HasBody(struct HttpRequest* req) {
+	/* HEAD responses never have a message body */
+	if (req->requestType == REQUEST_TYPE_HEAD) return false;
+	/* 1XX (Information) responses don't have message body */
+	if (req->statusCode >= 100 && req->statusCode <= 199) return false;
+	/* 204 (No Content) and 304 (Not Modified) also don't */
+	if (req->statusCode == 204 || req->statusCode == 304) return false;
+
+	return true;
+}
+
+/* RFC 7230, section 4.1 - Chunked Transfer Coding */
+static int HttpClient_GetChunkLength(const cc_string* line) {
+	int length = 0, i, part;
+
+	for (i = 0; i < line->length; i++) {
+		char c = line->buffer[i];
+		/* RFC 7230, section 4.1.1 - Chunk Extensions */
+		if (c == ';') break;
+
+		part = PackedCol_DeHex(c);
+		if (part == -1) return -1;
+		length = (length << 4) | part;
+	}
+	return length;
+}
+
+/* https://httpwg.org/specs/rfc7230.html */
+static cc_result HttpClient_Process(struct HttpClientState* state, char* buffer, int total) {
+	struct HttpRequest* req = state->req;
+	int offset = 0;
+
+	while (offset < total) {
+		switch (state->state) {
+
+		case HTTP_RESPONSE_STATE_HEADER:
+		{
+			for (; offset < total;) {
+				char c = buffer[offset++];
+				if (c == '\r') continue;
+				if (c != '\n') { String_Append(&state->header, c); continue; }
+
+				/* Zero length header = end of message headers */
+				if (state->header.length == 0) {
+					state->state = HTTP_RESPONSE_STATE_BODY_INIT;
+					break;
+				}
+
+				Http_ParseHeader(state->req, &state->header);
+				HttpClient_ParseHeader(state, &state->header);
+				state->header.length = 0;
+			}
+		}
+		break;
+
+		case HTTP_RESPONSE_STATE_BODY_INIT:
+		{
+			if (!HttpClient_HasBody(req)) {
+				state->state = HTTP_RESPONSE_STATE_DONE;
+			} else if (state->chunked) {
+				Http_BufferInit(req);
+				state->state = HTTP_RESPONSE_STATE_CHUNK_HEADER;
+			} else if (req->contentLength) {
+				Http_BufferInit(req);
+				state->state = HTTP_RESPONSE_STATE_BODY_DATA;
+			} else {
+				return HTTP_ERR_INVALID_BODY;
+			}
+		}
+		break;
+
+		case HTTP_RESPONSE_STATE_BODY_DATA:
+		{
+			cc_uint32 left  = total - offset;
+			cc_uint32 avail = req->contentLength - req->size;
+			cc_uint32 read  = min(left, avail);
+
+			Http_BufferEnsure(req, read);
+			Mem_Copy(req->data + req->size, buffer + offset, read);
+			Http_BufferExpanded(req, read);
+			offset += read;
+
+			if (req->size >= req->contentLength) {
+				state->state = HTTP_RESPONSE_STATE_DONE;
+			}
+		}
+		break;
+
+		/* RFC 7230, section 4.1 - Chunked Transfer Coding */
+		case HTTP_RESPONSE_STATE_CHUNK_HEADER:
+		{
+			for (; offset < total;) {
+				char c = buffer[offset++];
+				if (c == '\r') continue;
+				if (c != '\n') { String_Append(&state->header, c); continue; }
+
+				state->chunkLength = HttpClient_GetChunkLength(&state->header);
+				if (state->chunkLength < 0) return HTTP_ERR_CHUNK_SIZE;
+				state->header.length = 0;
+
+				if (state->chunkLength == 0) {
+					state->state = HTTP_RESPONSE_STATE_CHUNK_TRAILERS;
+				} else {
+					state->state = HTTP_RESPONSE_STATE_CHUNK_DATA;
+				}
+				break;
+			}
+		}
+		break;
+
+		case HTTP_RESPONSE_STATE_CHUNK_DATA:
+		{
+			cc_uint32 left  = total - offset;
+			cc_uint32 avail = state->chunkLength - state->chunkRead;
+			cc_uint32 read  = min(left, avail);
+
+			Http_BufferEnsure(req, read);
+			Mem_Copy(req->data + req->size, buffer + offset, read);
+			Http_BufferExpanded(req, read);
+			state->chunkRead += read;
+			offset += read;
+
+			if (state->chunkRead >= state->chunkLength) {
+				state->state       = HTTP_RESPONSE_STATE_CHUNK_END_R;
+				state->chunkRead   = 0;
+				state->chunkLength = 0;
+			}
+		}
+		break;
+
+		/* Chunks are terminated by \r\n */
+		case HTTP_RESPONSE_STATE_CHUNK_END_R:
+			if (buffer[offset++] != '\r') return ERR_INVALID_ARGUMENT;
+
+			state->state = HTTP_RESPONSE_STATE_CHUNK_END_N;
+			break;
+
+		case HTTP_RESPONSE_STATE_CHUNK_END_N:
+			if (buffer[offset++] != '\n') return ERR_INVALID_ARGUMENT;
+
+			state->state = HTTP_RESPONSE_STATE_CHUNK_HEADER;
+			break;
+
+		/* RFC 7230, section 4.1.2 - Chunked Trailer Part */
+		case HTTP_RESPONSE_STATE_CHUNK_TRAILERS:
+		{
+			for (; offset < total;) {
+				char c = buffer[offset++];
+				if (c == '\r') continue;
+				if (c != '\n') { String_Append(&state->header, c); continue; }
+
+				/* Zero length header = end of message trailers */
+				if (state->header.length == 0) {
+					state->state = HTTP_RESPONSE_STATE_DONE;
+					break;
+				}
+				state->header.length = 0;
+			}
+		} 
+		break;
+
+		default:
+			return 0;
+		}
+	}
+	return 0;
+}
+
+static cc_result HttpClient_ParseResponse(struct HttpClientState* state) {
+	char buffer[8192];
+	cc_uint32 total;
+	cc_result res;
+
+	for (;;) {
+		res = HttpConnection_Read(&state->conn, buffer, 8192, &total);
+		if (res)        return res;
+		if (total == 0) return ERR_END_OF_STREAM;
+
+		res = HttpClient_Process(state, buffer, total);
+		if (res) return res;
+		if (state->state == HTTP_RESPONSE_STATE_DONE) return 0;
+	}
+}
+
+static cc_bool HttpClient_IsRedirect(struct HttpRequest* req) {
+	return req->statusCode >= 300 && req->statusCode <= 399 && req->statusCode != 304;
+}
+
+static cc_result HttpClient_HandleRedirect(struct HttpClientState* state) {
+	cc_result res = HttpUrl_ResolveRedirect(&state->url, &state->location);
+	if (res) return res;
+
+	HttpRequest_Free(state->req);
+	Platform_Log1("  Redirecting to: %s", &state->location);
+	state->req->contentLength = 0; /* TODO */
+	return 0;
+}
+
+
+/*########################################################################################################################*
+*-----------------------------------------------Http backend implementation-----------------------------------------------*
+*#########################################################################################################################*/
+static void HttpBackend_Init(void) {
+	SSLBackend_Init(httpsVerify);
+	//httpOnly = true; // TODO: insecure
+}
+
+static void Http_AddHeader(struct HttpRequest* req, const char* key, const cc_string* value) {
+	String_Format2((cc_string*)req->meta, "%c:%s\r\n", key, value);
+}
+
+static cc_result HttpBackend_Do(struct HttpRequest* req, cc_string* urlStr) {
+	struct HttpClientState state;
+	int redirects = 0;
+	cc_result res;
+
+	HttpClientState_Init(&state);
+	HttpUrl_Parse(urlStr, &state.url);
+	state.req = req;
+
+	for (;;) {
+		res = HttpConnection_Open(&state.conn, &state.url);
+		if (res) { HttpConnection_Close(&state.conn); return res; }
+
+		res = HttpClient_SendRequest(&state);
+		if (res) { HttpConnection_Close(&state.conn); return res; }
+
+		res = HttpClient_ParseResponse(&state);
+		http_curProgress = 100;
+		HttpConnection_Close(&state.conn);
+
+		if (res || !HttpClient_IsRedirect(req)) break;
+		if (redirects >= 20) return HTTP_ERR_REDIRECTS;
+
+		/* TODO FOLLOW LOCATION PROPERLY */
+		redirects++;
+		res = HttpClient_HandleRedirect(&state);
+		if (res) break;
+		HttpClientState_Reset(&state);
+	}
+	return res;
+}
+
+static cc_bool HttpBackend_DescribeError(cc_result res, cc_string* dst) {
+	return SSLBackend_DescribeError(res, dst);
 }
 #elif defined CC_BUILD_WININET
 /*########################################################################################################################*

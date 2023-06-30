@@ -3,7 +3,7 @@
 
 #include "_PlatformBase.h"
 #include "Stream.h"
-#include "Drawer2D.h"
+#include "SystemFonts.h"
 #include "Funcs.h"
 #include "Utils.h"
 #include "Errors.h"
@@ -22,6 +22,7 @@
 /* === BEGIN shellapi.h === */
 #define SHELLAPI DECLSPEC_IMPORT
 SHELLAPI HINSTANCE WINAPI ShellExecuteW(HWND hwnd, LPCWSTR operation, LPCWSTR file, LPCWSTR parameters, LPCWSTR directory, INT showCmd);
+SHELLAPI HINSTANCE WINAPI ShellExecuteA(HWND hwnd, LPCSTR operation,  LPCSTR file,  LPCSTR  parameters, LPCSTR  directory, INT showCmd);
 /* === END shellapi.h === */
 /* === BEGIN wincrypt.h === */
 typedef struct _CRYPTOAPI_BLOB {
@@ -140,23 +141,24 @@ cc_uint64 Stopwatch_Measure(void) {
 void Directory_GetCachePath(cc_string* path) { }
 
 cc_result Directory_Create(const cc_string* path) {
-	WCHAR str[NATIVE_STR_LEN];
+	cc_winstring str;
 	cc_result res;
 
-	Platform_EncodeUtf16(str, path);
-	if (CreateDirectoryW(str, NULL)) return 0;
+	Platform_EncodeString(&str, path);
+	if (CreateDirectoryW(str.uni, NULL)) return 0;
+	/* Windows 9x does not support W API functions */
 	if ((res = GetLastError()) != ERROR_CALL_NOT_IMPLEMENTED) return res;
 
-	Platform_Utf16ToAnsi(str);
-	return CreateDirectoryA((LPCSTR)str, NULL) ? 0 : GetLastError();
+	return CreateDirectoryA(str.ansi, NULL) ? 0 : GetLastError();
 }
 
 int File_Exists(const cc_string* path) {
-	WCHAR str[NATIVE_STR_LEN];
+	cc_winstring str;
 	DWORD attribs;
 
-	Platform_EncodeUtf16(str, path);
-	attribs = GetFileAttributesW(str);
+	Platform_EncodeString(&str, path);
+	attribs = GetFileAttributesW(str.uni);
+
 	return attribs != INVALID_FILE_ATTRIBUTES && !(attribs & FILE_ATTRIBUTE_DIRECTORY);
 }
 
@@ -177,26 +179,25 @@ static cc_result Directory_EnumCore(const cc_string* dirPath, const cc_string* f
 
 cc_result Directory_Enum(const cc_string* dirPath, void* obj, Directory_EnumCallback callback) {
 	cc_string path; char pathBuffer[MAX_PATH + 10];
-	WCHAR str[NATIVE_STR_LEN];
 	WIN32_FIND_DATAW eW;
 	WIN32_FIND_DATAA eA;
 	int i, ansi = false;
+	cc_winstring str;
 	HANDLE find;
 	cc_result res;	
 
 	/* Need to append \* to search for files in directory */
 	String_InitArray(path, pathBuffer);
 	String_Format1(&path, "%s\\*", dirPath);
-	Platform_EncodeUtf16(str, &path);
+	Platform_EncodeString(&str, &path);
 	
-	find = FindFirstFileW(str, &eW);
+	find = FindFirstFileW(str.uni, &eW);
 	if (!find || find == INVALID_HANDLE_VALUE) {
 		if ((res = GetLastError()) != ERROR_CALL_NOT_IMPLEMENTED) return res;
 		ansi = true;
 
 		/* Windows 9x does not support W API functions */
-		Platform_Utf16ToAnsi(str);
-		find = FindFirstFileA((LPCSTR)str, &eA);
+		find = FindFirstFileA(str.ansi, &eA);
 		if (find == INVALID_HANDLE_VALUE) return GetLastError();
 	}
 
@@ -224,19 +225,22 @@ cc_result Directory_Enum(const cc_string* dirPath, void* obj, Directory_EnumCall
 	return res == ERROR_NO_MORE_FILES ? 0 : res;
 }
 
-static cc_result DoFile(cc_file* file, const cc_string* path, DWORD access, DWORD createMode) {
-	WCHAR str[NATIVE_STR_LEN];
+static cc_result DoFileRaw(cc_file* file, const cc_winstring* str, DWORD access, DWORD createMode) {
 	cc_result res;
-	Platform_EncodeUtf16(str, path);
 
-	*file = CreateFileW(str, access, FILE_SHARE_READ, NULL, createMode, 0, NULL);
+	*file = CreateFileW(str->uni,  access, FILE_SHARE_READ, NULL, createMode, 0, NULL);
 	if (*file && *file != INVALID_HANDLE_VALUE) return 0;
 	if ((res = GetLastError()) != ERROR_CALL_NOT_IMPLEMENTED) return res;
 
 	/* Windows 9x does not support W API functions */
-	Platform_Utf16ToAnsi(str);
-	*file = CreateFileA((LPCSTR)str, access, FILE_SHARE_READ, NULL, createMode, 0, NULL);
+	*file = CreateFileA(str->ansi, access, FILE_SHARE_READ, NULL, createMode, 0, NULL);
 	return *file != INVALID_HANDLE_VALUE ? 0 : GetLastError();
+}
+
+static cc_result DoFile(cc_file* file, const cc_string* path, DWORD access, DWORD createMode) {
+	cc_winstring str;
+	Platform_EncodeString(&str, path);
+	return DoFileRaw(file, &str, access, createMode);
 }
 
 cc_result File_Open(cc_file* file, const cc_string* path) {
@@ -282,7 +286,7 @@ cc_result File_Length(cc_file file, cc_uint32* len) {
 
 /*########################################################################################################################*
 *--------------------------------------------------------Threading--------------------------------------------------------*
-*#########################################################################################################################*/
+*#############################################################################################################p############*/
 void Thread_Sleep(cc_uint32 milliseconds) { Sleep(milliseconds); }
 static DWORD WINAPI ExecThread(void* param) {
 	Thread_StartFunc func = (Thread_StartFunc)param;
@@ -413,12 +417,9 @@ static INT WSAAPI FallbackParseAddress(LPWSTR addressString, INT addressFamily, 
 	SOCKADDR_IN* addr4 = (SOCKADDR_IN*)address;
 	cc_uint8*    addr  = (cc_uint8*)&addr4->sin_addr;
 	cc_string ip, parts[4 + 1];
-	WCHAR tmp[NATIVE_STR_LEN];
+	cc_winstring* addrStr = (cc_winstring*)addressString;
 
-	Mem_Copy(tmp, addressString, sizeof(tmp));
-	Platform_Utf16ToAnsi(tmp);
-	ip = String_FromReadonly((char*)tmp);
-
+	ip = String_FromReadonly(addrStr->ansi);
 	/* 4+1 in case user tries '1.1.1.1.1' */
 	if (String_UNSAFE_Split(&ip, '.', parts, 4 + 1) != 4)
 		return ERR_INVALID_ARGUMENT;
@@ -453,13 +454,21 @@ static void LoadWinsockFuncs(void) {
 	if (!_WSAStringToAddressW) _WSAStringToAddressW = FallbackParseAddress;
 }
 
-static int ParseHost(void* dst, WCHAR* host, int port) {
+static int ParseHost(void* dst, char* host, int port) {
 	SOCKADDR_IN* addr4 = (SOCKADDR_IN*)dst;
 	struct hostent* res;
+	cc_result wsa_res;
 
-	Platform_Utf16ToAnsi(host);
-	res = _gethostbyname((char*)host);
-	if (!res || res->h_addrtype != AF_INET) return false;
+	res = _gethostbyname(host);
+	if (!res) {
+		wsa_res = _WSAGetLastError();
+
+		if (wsa_res == WSAHOST_NOT_FOUND) return SOCK_ERR_UNKNOWN_HOST;
+		return ERR_INVALID_ARGUMENT;
+	}
+		
+	/* per MSDN, should only be getting AF_INET returned from this */
+	if (res->h_addrtype != AF_INET) return ERR_INVALID_ARGUMENT;
 
 	/* Must have at least one IPv4 address */
 	if (!res->h_addr_list[0]) return false;
@@ -467,50 +476,53 @@ static int ParseHost(void* dst, WCHAR* host, int port) {
 	addr4->sin_family = AF_INET;
 	addr4->sin_port   = _htons(port);
 	addr4->sin_addr   = *(IN_ADDR*)res->h_addr_list[0];
-	return true;
+	return 0;
 }
 
 static int Socket_ParseAddress(void* dst, INT* size, const cc_string* address, int port) {
 	SOCKADDR_IN*  addr4 =  (SOCKADDR_IN*)dst;
 	SOCKADDR_IN6* addr6 = (SOCKADDR_IN6*)dst;
-	WCHAR str[NATIVE_STR_LEN];
-	Platform_EncodeUtf16(str, address);
+	cc_winstring addr;
+	Platform_EncodeString(&addr, address);
 
 	*size = sizeof(*addr4);
-	if (!_WSAStringToAddressW(str, AF_INET,  NULL, addr4, size)) {
+	if (!_WSAStringToAddressW(addr.uni, AF_INET,  NULL, addr4, size)) {
 		addr4->sin_port  = _htons(port);
-		return true;
+		return 0;
 	}
 
 	*size = sizeof(*addr6);
-	if (!_WSAStringToAddressW(str, AF_INET6, NULL, addr6, size)) {
+	if (!_WSAStringToAddressW(addr.uni, AF_INET6, NULL, addr6, size)) {
 		addr6->sin6_port = _htons(port);
-		return true;
+		return 0;
 	}
 
 	*size = sizeof(*addr4);
-	return ParseHost(dst, str, port);
+	return ParseHost(dst, addr.ansi, port);
 }
 
 int Socket_ValidAddress(const cc_string* address) {
 	SOCKADDR_STORAGE addr;
 	INT addrSize;
-	return Socket_ParseAddress(&addr, &addrSize, address, 0);
+	return Socket_ParseAddress(&addr, &addrSize, address, 0) == 0;
 }
 
-cc_result Socket_Connect(cc_socket* s, const cc_string* address, int port) {
-	int blockingMode = -1; /* non-blocking mode */
+cc_result Socket_Connect(cc_socket* s, const cc_string* address, int port, cc_bool nonblocking) {
 	SOCKADDR_STORAGE addr;
 	cc_result res;
 	INT addrSize;
 
-	*s = -1;
-	if (!Socket_ParseAddress(&addr, &addrSize, address, port))
-		return ERR_INVALID_ARGUMENT;
+	*s  = -1;
+	res = Socket_ParseAddress(&addr, &addrSize, address, port);
+	if (res) return res;
 
 	*s = _socket(addr.ss_family, SOCK_STREAM, IPPROTO_TCP);
 	if (*s == -1) return _WSAGetLastError();
-	_ioctlsocket(*s, FIONBIO, &blockingMode);
+
+	if (nonblocking) {
+		u_long blockingMode = -1; /* non-blocking mode */
+		_ioctlsocket(*s, FIONBIO, &blockingMode);
+	}
 
 	res = _connect(*s, (SOCKADDR*)&addr, addrSize);
 	return res == -1 ? _WSAGetLastError() : 0;
@@ -557,12 +569,11 @@ cc_result Socket_CheckReadable(cc_socket s, cc_bool* readable) {
 }
 
 cc_result Socket_CheckWritable(cc_socket s, cc_bool* writable) {
-	int resultSize;
-	cc_result res = Socket_Poll(s, SOCKET_POLL_WRITE, writable);
+	int resultSize = sizeof(cc_result);
+	cc_result res  = Socket_Poll(s, SOCKET_POLL_WRITE, writable);
 	if (res || *writable) return res;
 
 	/* https://stackoverflow.com/questions/29479953/so-error-value-after-successful-socket-operation */
-	resultSize = sizeof(cc_result);
 	_getsockopt(s, SOL_SOCKET, SO_ERROR, (char*)&res, &resultSize);
 	return res;
 }
@@ -571,21 +582,34 @@ cc_result Socket_CheckWritable(cc_socket s, cc_bool* writable) {
 /*########################################################################################################################*
 *-----------------------------------------------------Process/Module------------------------------------------------------*
 *#########################################################################################################################*/
-static cc_result Process_RawGetExePath(WCHAR* path, int* len) {
-	*len = GetModuleFileNameW(NULL, path, NATIVE_STR_LEN);
-	return *len ? 0 : GetLastError();
+static cc_result Process_RawGetExePath(cc_winstring* path, int* len) {
+	cc_result res;
+
+	/* If GetModuleFileNameA fails.. that's a serious problem */
+	*len = GetModuleFileNameA(NULL, path->ansi, NATIVE_STR_LEN);
+	path->ansi[*len] = '\0';
+	if (!(*len)) return GetLastError();
+	
+	*len = GetModuleFileNameW(NULL, path->uni, NATIVE_STR_LEN);
+	path->uni[*len]  = '\0';
+	if (*len) return 0;
+
+	/* GetModuleFileNameW can fail on Win 9x */
+	res = GetLastError();
+	if (res == ERROR_CALL_NOT_IMPLEMENTED) res = 0;
+	return res;
 }
 
 cc_result Process_StartGame2(const cc_string* args, int numArgs) {
-	WCHAR path[NATIVE_STR_LEN + 1], raw[NATIVE_STR_LEN];
+	cc_winstring path;
 	cc_string argv; char argvBuffer[NATIVE_STR_LEN];
 	STARTUPINFOW si        = { 0 };
 	PROCESS_INFORMATION pi = { 0 };
+	cc_winstring raw;
 	cc_result res;
 	int len, i;
 
-	Process_RawGetExePath(path, &len);
-	path[len] = '\0';
+	if ((res = Process_RawGetExePath(&path, &len))) return res;
 	si.cb = sizeof(STARTUPINFOW);
 	
 	String_InitArray(argv, argvBuffer);
@@ -599,22 +623,17 @@ cc_result Process_StartGame2(const cc_string* args, int numArgs) {
 			String_Format1(&argv, " %s",     &args[i]);
 		}
 	}
-	Platform_EncodeUtf16(raw, &argv);
+	Platform_EncodeString(&raw, &argv);
 
-	if (CreateProcessW(path, raw, NULL, NULL, 
-			false, 0, NULL, NULL, &si, &pi)) goto success;
-	if ((res = GetLastError()) != ERROR_CALL_NOT_IMPLEMENTED) return res;
+	if (path.uni[0]) {
+		if (!CreateProcessW(path.uni, raw.uni, NULL, NULL,
+				false, 0, NULL, NULL, &si, &pi)) return GetLastError();
+	} else {
+		/* Windows 9x does not support W API functions */
+		if (!CreateProcessA(path.ansi, raw.ansi, NULL, NULL,
+				false, 0, NULL, NULL, &si, &pi)) return GetLastError();
+	}
 
-	/* Windows 9x does not support W API functions */
-	len = GetModuleFileNameA(NULL, (LPSTR)path, NATIVE_STR_LEN);
-	((char*)path)[len] = '\0';
-	Platform_Utf16ToAnsi(raw);
-
-	if (CreateProcessA((LPCSTR)path, (LPSTR)raw, NULL, NULL,
-			false, 0, NULL, NULL, &si, &pi)) goto success;
-	return GetLastError();
-
-success:
 	/* Don't leak memory for process return code */
 	CloseHandle(pi.hProcess);
 	CloseHandle(pi.hThread);
@@ -623,11 +642,14 @@ success:
 
 void Process_Exit(cc_result code) { ExitProcess(code); }
 cc_result Process_StartOpen(const cc_string* args) {
-	WCHAR str[NATIVE_STR_LEN];
+	cc_winstring str;
 	cc_uintptr res;
-	Platform_EncodeUtf16(str, args);
+	Platform_EncodeString(&str, args);
 
-	res = (cc_uintptr)ShellExecuteW(NULL, NULL, str, NULL, NULL, SW_SHOWNORMAL);
+	res = (cc_uintptr)ShellExecuteW(NULL, NULL, str.uni, NULL, NULL, SW_SHOWNORMAL);
+	/* Windows 9x always returns "error 0" for ShellExecuteW */
+	if (res == 0) res = (cc_uintptr)ShellExecuteA(NULL, NULL, str.ansi, NULL, NULL, SW_SHOWNORMAL);
+
 	/* MSDN: "If the function succeeds, it returns a value greater than 32. If the function fails, */
 	/*  it returns an error value that indicates the cause of the failure" */
 	return res > 32 ? 0 : (cc_result)res;
@@ -658,36 +680,34 @@ cc_bool Updater_Clean(void) {
 }
 
 cc_result Updater_Start(const char** action) {
-	WCHAR path[NATIVE_STR_LEN + 1];
+	cc_winstring path;
 	cc_result res;
-	int len = 0;
+	int len;
 
 	*action = "Getting executable path";
-	if ((res = Process_RawGetExePath(path, &len))) return res;
-	path[len] = '\0';
+	if ((res = Process_RawGetExePath(&path, &len))) return res;
 
-	*action = "Moving executable to CC_prev.exe";
-	if (!MoveFileExW(path, UPDATE_TMP, MOVEFILE_REPLACE_EXISTING)) return GetLastError();
+	*action = "Moving executable to CC_prev.exe"; 
+	if (!path.uni[0]) return ERR_NOT_SUPPORTED; /* MoveFileA returns ERROR_ACCESS_DENIED on Win 9x anyways */
+	if (!MoveFileExW(path.uni, UPDATE_TMP, MOVEFILE_REPLACE_EXISTING)) return GetLastError();
+
 	*action = "Replacing executable";
-	if (!MoveFileExW(UPDATE_SRC, path, MOVEFILE_REPLACE_EXISTING)) return GetLastError();
+	if (!MoveFileExW(UPDATE_SRC, path.uni, MOVEFILE_REPLACE_EXISTING)) return GetLastError();
 
 	*action = "Restarting game";
 	return Process_StartGame2(NULL, 0);
 }
 
 cc_result Updater_GetBuildTime(cc_uint64* timestamp) {
-	WCHAR path[NATIVE_STR_LEN + 1];
+	cc_winstring path;
 	cc_file file;
 	FILETIME ft;
 	cc_uint64 raw;
-	int len = 0;
+	cc_result res;
+	int len;
 
-	cc_result res = Process_RawGetExePath(path, &len);
-	if (res) return res;
-	path[len] = '\0';
-
-	file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
-	if (file == INVALID_HANDLE_VALUE) return GetLastError();
+	if ((res = Process_RawGetExePath(&path, &len))) return res;
+	if ((res = DoFileRaw(&file, &path, GENERIC_READ, OPEN_EXISTING))) return res;
 
 	if (GetFileTime(file, NULL, NULL, &ft)) {
 		raw        = ft.dwLowDateTime | ((cc_uint64)ft.dwHighDateTime << 32);
@@ -727,17 +747,16 @@ const cc_string DynamicLib_Ext = String_FromConst(".dll");
 static cc_result dynamicErr;
 
 void* DynamicLib_Load2(const cc_string* path) {
-	WCHAR str[NATIVE_STR_LEN];
+	cc_winstring str;
 	void* lib;
-	Platform_EncodeUtf16(str, path);
+	Platform_EncodeString(&str, path);
 
-	if ((lib = LoadLibraryW(str))) return lib;
+	if ((lib = LoadLibraryW(str.uni))) return lib;
 	dynamicErr = GetLastError();
 	if (dynamicErr != ERROR_CALL_NOT_IMPLEMENTED) return NULL;
 
 	/* Windows 9x only supports A variants */
-	Platform_Utf16ToAnsi(str);
-	lib = LoadLibraryA((char*)str);
+	lib = LoadLibraryA(str.ansi);
 	if (!lib) dynamicErr = GetLastError();
 	return lib;
 }
@@ -761,24 +780,23 @@ cc_bool DynamicLib_DescribeError(cc_string* dst) {
 /*########################################################################################################################*
 *--------------------------------------------------------Platform---------------------------------------------------------*
 *#########################################################################################################################*/
-int Platform_EncodeUtf16(void* data, const cc_string* src) {
-	WCHAR* dst = (WCHAR*)data;
+void Platform_EncodeString(cc_winstring* dst, const cc_string* src) {
+	cc_unichar* uni;
+	char* ansi;
 	int i;
 	if (src->length > FILENAME_SIZE) Logger_Abort("String too long to expand");
 
+	uni = dst->uni;
 	for (i = 0; i < src->length; i++) {
-		*dst++ = Convert_CP437ToUnicode(src->buffer[i]);
+		*uni++ = Convert_CP437ToUnicode(src->buffer[i]);
 	}
-	*dst = '\0';
-	return src->length * 2;
-}
+	*uni = '\0';
 
-void Platform_Utf16ToAnsi(void* data) {
-	WCHAR* src = (WCHAR*)data;
-	char* dst  = (char*)data;
-
-	while (*src) { *dst++ = (char)(*src++); }
-	*dst = '\0';
+	ansi = dst->ansi;
+	for (i = 0; i < src->length; i++) {
+		*ansi++ = (char)dst->uni[i];
+	}
+	*ansi = '\0';
 }
 
 static void Platform_InitStopwatch(void) {
@@ -960,20 +978,23 @@ static cc_bool IsProblematicWorkingDirectory(void) {
 }
 
 cc_result Platform_SetDefaultCurrentDirectory(int argc, char** argv) {
-	WCHAR path[NATIVE_STR_LEN + 1];
+	cc_winstring path;
 	int i, len;
 	cc_result res;
 	if (!IsProblematicWorkingDirectory()) return 0;
 
-	res = Process_RawGetExePath(path, &len);
+	res = Process_RawGetExePath(&path, &len);
 	if (res) return res;
+	if (!path.uni[0]) return ERR_NOT_SUPPORTED; 
+	/* Not implemented on ANSI only systems due to laziness */
 
 	/* Get rid of filename at end of directory */
-	for (i = len - 1; i >= 0; i--, len--) {
-		if (path[i] == '/' || path[i] == '\\') break;
+	for (i = len - 1; i >= 0; i--, len--) 
+	{
+		if (path.uni[i] == '/' || path.uni[i] == '\\') break;
 	}
 
-	path[len] = '\0';
-	return SetCurrentDirectoryW(path) ? 0 : GetLastError();
+	path.uni[len] = '\0';
+	return SetCurrentDirectoryW(path.uni) ? 0 : GetLastError();
 }
 #endif
