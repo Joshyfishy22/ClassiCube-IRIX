@@ -73,7 +73,7 @@ static void LScreen_CycleSelected(struct LScreen* s, int dir) {
 		if (i < 0) i += s->numWidgets;
 
 		w = s->widgets[i];
-		if (!w->tabSelectable) continue;
+		if (!w->autoSelectable) continue;
 
 		LScreen_UnselectWidget(s, 0, s->selectedWidget);
 		LScreen_SelectWidget(s, 0, w, false);
@@ -107,6 +107,8 @@ static void LScreen_KeyDown(struct LScreen* s, int key, cc_bool was) {
 		LScreen_CycleSelected(s, -1);
 	} else if (key == IPT_DOWN) {
 		LScreen_CycleSelected(s,  1);
+	} else if (key == IPT_ESCAPE && s->onEscapeWidget) {
+		s->onEscapeWidget->OnClick(s->onEscapeWidget);
 	}
 }
 
@@ -142,7 +144,6 @@ CC_NOINLINE static void LScreen_Reset(struct LScreen* s) {
 		s->widgets[i]->selected = false;
 	}
 
-	s->onEnterWidget  = NULL;
 	s->hoveredWidget  = NULL;
 	s->selectedWidget = NULL;
 }
@@ -256,8 +257,9 @@ void ChooseModeScreen_SetActive(cc_bool firstTime) {
 	s->Show      = ChooseModeScreen_Show;
 	s->firstTime = firstTime;
 
-	s->title         = "Choose mode";
-	s->onEnterWidget = (struct LWidget*)&s->btnEnhanced;
+	s->title          = "Choose mode";
+	s->onEnterWidget  = (struct LWidget*)&s->btnEnhanced;
+	s->onEscapeWidget = firstTime ? NULL : (struct LWidget*)&s->btnBack;
 	Launcher_SetScreen((struct LScreen*)s);
 }
 
@@ -441,7 +443,8 @@ void ColoursScreen_SetActive(void) {
 	s->KeyDown    = ColoursScreen_KeyDown;
 	s->MouseWheel = ColoursScreen_MouseWheel;
 
-	s->title      = "Custom theme";
+	s->title          = "Custom theme";
+	s->onEscapeWidget = (struct LWidget*)&s->btnBack;
 	Launcher_SetScreen((struct LScreen*)s);
 }
 
@@ -581,8 +584,9 @@ void DirectConnectScreen_SetActive(void) {
 	LScreen_Reset((struct LScreen*)s);
 	s->Init = DirectConnectScreen_Init;
 
-	s->title         = "Direct connect";
-	s->onEnterWidget = (struct LWidget*)&s->btnConnect;
+	s->title          = "Direct connect";
+	s->onEnterWidget  = (struct LWidget*)&s->btnConnect;
+	s->onEscapeWidget = (struct LWidget*)&s->btnBack;
 	Launcher_SetScreen((struct LScreen*)s);
 }
 
@@ -1072,7 +1076,8 @@ void CheckResourcesScreen_SetActive(void) {
 	s->Show   = CheckResourcesScreen_Show;
 	s->DrawBackground = CheckResourcesScreen_DrawBackground;
 	s->ResetArea      = CheckResourcesScreen_ResetArea;
-	s->onEnterWidget  = (struct LWidget*)&s->btnYes;
+
+	s->onEnterWidget = (struct LWidget*)&s->btnYes;
 	Launcher_SetScreen((struct LScreen*)s);
 }
 
@@ -1356,7 +1361,9 @@ void ServersScreen_SetActive(void) {
 	s->MouseWheel = ServersScreen_MouseWheel;
 	s->KeyDown    = ServersScreen_KeyDown;
 	s->MouseUp    = ServersScreen_MouseUp;
-	s->onEnterWidget = (struct LWidget*)&s->btnConnect;
+
+	s->onEnterWidget  = (struct LWidget*)&s->btnConnect;
+	s->onEscapeWidget = (struct LWidget*)&s->btnBack;
 	Launcher_SetScreen((struct LScreen*)s);
 }
 
@@ -1481,7 +1488,8 @@ void SettingsScreen_SetActive(void) {
 	s->Init   = SettingsScreen_Init;
 	s->Show   = SettingsScreen_Show;
 
-	s->title  = "Options";
+	s->title          = "Options";
+	s->onEscapeWidget = (struct LWidget*)&s->btnBack;
 	Launcher_SetScreen((struct LScreen*)s);
 }
 
@@ -1547,7 +1555,8 @@ void ThemesScreen_SetActive(void) {
 	LScreen_Reset((struct LScreen*)s);
 	s->Init   = ThemesScreen_Init;
 
-	s->title  = "Select theme";
+	s->title          = "Select theme";
+	s->onEscapeWidget = (struct LWidget*)&s->btnBack;
 	Launcher_SetScreen((struct LScreen*)s);
 }
 
@@ -1806,7 +1815,8 @@ void UpdatesScreen_SetActive(void) {
 	s->Tick   = UpdatesScreen_Tick;
 	s->Free   = UpdatesScreen_Free;
 
-	s->title  = "Update game";
+	s->title          = "Update game";
+	s->onEscapeWidget = (struct LWidget*)&s->btnBack;
 	Launcher_SetScreen((struct LScreen*)s);
 }
 #endif
