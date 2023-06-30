@@ -56,11 +56,7 @@ static const struct SimpleBlockDef core_blockDefs[] = {
 
 { "Coal ore",         34, 34, 34, 16, FOG_NONE ,   0, false,  true, 100, DRAW_OPAQUE, COLLIDE_SOLID, SOUND_STONE,  SOUND_STONE  },
 { "Log",              21, 20, 21, 16, FOG_NONE ,   0, false,  true, 100, DRAW_OPAQUE, COLLIDE_SOLID, SOUND_WOOD,   SOUND_WOOD   },
-#ifdef CC_BUILD_LOWPOLYS // makes leaves on IRIX face cull for performance  
-{ "Leaves",           22, 22, 22, 16, FOG_NONE ,   0, false, true,  40, DRAW_TRANSPARENT, COLLIDE_SOLID, SOUND_GRASS, SOUND_GRASS },
-#else
 { "Leaves",           22, 22, 22, 16, FOG_NONE ,   0, false, false,  40, DRAW_TRANSPARENT_THICK, COLLIDE_SOLID, SOUND_GRASS, SOUND_GRASS },
-#endif
 { "Sponge",           48, 48, 48, 16, FOG_NONE ,   0, false,  true,  90, DRAW_OPAQUE, COLLIDE_SOLID, SOUND_GRASS,  SOUND_GRASS  },
 { "Glass",            49, 49, 49, 16, FOG_NONE ,   0, false, false, 100, DRAW_TRANSPARENT, COLLIDE_SOLID, SOUND_GLASS,SOUND_STONE},
 { "Red",              64, 64, 64, 16, FOG_NONE ,   0, false,  true, 100, DRAW_OPAQUE, COLLIDE_SOLID, SOUND_CLOTH,  SOUND_CLOTH  },
