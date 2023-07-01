@@ -155,7 +155,7 @@ static void RenderNormalBatch(int batch) {
 		offset = part.Offset;
 		count  = part.SpriteCount >> 2; /* 4 per sprite */
 
-		Gfx_SetFaceCulling(true);
+		//Gfx_SetFaceCulling(true);
 		/* TODO: fix to not render them all */
 #ifdef CC_BUILD_GL11
 		Gfx_DrawIndexedTris_T2fC4b(part.Vbs[FACE_COUNT], 0);
