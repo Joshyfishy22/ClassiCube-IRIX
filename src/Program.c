@@ -138,9 +138,9 @@ void android_main(void) {
 	SetupProgram(0, NULL);
 	for (;;) { RunProgram(0, NULL); }
 }
-#elif defined CC_BUILD_3DS || defined CC_BUILD_PSP
+#elif defined CC_BUILD_3DS || defined CC_BUILD_PSP || defined CC_BUILD_GCWII
 int main(int argc, char** argv) {
-	SetupProgram(argc, argc);
+	SetupProgram(argc, argv);
 	for (;;) { RunProgram(argc, argv); }
 	return 0;
 }
