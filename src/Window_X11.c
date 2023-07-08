@@ -19,6 +19,10 @@
 #define XK_MISCELLANY
 #define XK_LATIN1
 #include <X11/keysymdef.h>
+
+#ifndef GLX_HYPERPIPE_PIPE_NAME_LENGTH_SGIX
+#define GLX_HYPERPIPE_PIPE_NAME_LENGTH_SGIX 80
+#endif
 #endif
 
 #ifdef X_HAVE_UTF8_STRING
