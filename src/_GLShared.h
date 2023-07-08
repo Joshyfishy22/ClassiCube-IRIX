@@ -102,6 +102,7 @@ static void Gfx_DoMipmaps(int x, int y, struct Bitmap* bmp, int rowWidth, cc_boo
 	if (prev != bmp->scan0) Mem_Free(prev);
 }
 
+#if !defined CC_BUILD_IRIX
 GfxResourceID Gfx_CreateTexture(struct Bitmap* bmp, cc_uint8 flags, cc_bool mipmaps) {
 	GLuint texId;
 	glGenTextures(1, &texId);
@@ -154,19 +155,24 @@ void Gfx_UpdateTexture(GfxResourceID texId, int x, int y, struct Bitmap* part, i
 	} else {
 		UpdateTextureSlow(x, y, part, rowWidth);
 	}
+
 	if (mipmaps) Gfx_DoMipmaps(x, y, part, rowWidth, true);
 }
+
+#endif
 
 void Gfx_UpdateTexturePart(GfxResourceID texId, int x, int y, struct Bitmap* part, cc_bool mipmaps) {
 	Gfx_UpdateTexture(texId, x, y, part, part->width, mipmaps);
 }
 
+#if !defined CC_BUILD_IRIX
 void Gfx_DeleteTexture(GfxResourceID* texId) {
 	GLuint id = (GLuint)(*texId);
 	if (!id) return;
 	glDeleteTextures(1, &id);
 	*texId = 0;
 }
+#endif
 
 void Gfx_EnableMipmaps(void) { }
 void Gfx_DisableMipmaps(void) { }

@@ -50,7 +50,7 @@ static int chunksCount;
 static void ChunkInfo_Reset(struct ChunkInfo* chunk, int x, int y, int z) {
 	chunk->CentreX = x + HALF_CHUNK_SIZE; chunk->CentreY = y + HALF_CHUNK_SIZE; 
 	chunk->CentreZ = z + HALF_CHUNK_SIZE;
-#ifndef CC_BUILD_GL11
+#if !defined CC_BUILD_GL11 || defined CC_BUILD_IRIX
 	chunk->Vb = 0;
 #endif
 
@@ -95,7 +95,7 @@ static void CheckWeather(double delta) {
 	Gfx_SetAlphaBlending(false);
 }
 
-#ifdef CC_BUILD_GL11
+#if defined CC_BUILD_GL11 && !defined CC_BUILD_IRIX
 #define DrawFace(face, ign)    Gfx_BindVb(part.Vbs[face]); Gfx_DrawIndexedTris_T2fC4b(0, 0);
 #define DrawFaces(f1, f2, ign) DrawFace(f1, ign); DrawFace(f2, ign);
 #else
@@ -132,7 +132,7 @@ static void RenderNormalBatch(int batch) {
 		if (part.Offset < 0) continue;
 		hasNormParts[batch] = true;
 
-#ifndef CC_BUILD_GL11
+#if !defined CC_BUILD_GL11 || defined CC_BUILD_IRIX
 		Gfx_BindVb_Textured(info->Vb);
 #endif
 
@@ -157,7 +157,7 @@ static void RenderNormalBatch(int batch) {
 
 		//Gfx_SetFaceCulling(true);
 		/* TODO: fix to not render them all */
-#ifdef CC_BUILD_GL11
+#if defined CC_BUILD_GL11 && !defined CC_BUILD_IRIX
 		Gfx_BindVb(part.Vbs[FACE_COUNT]);
 		Gfx_DrawIndexedTris_T2fC4b(0, 0);
 		Game_Vertices += count * 4;
@@ -235,7 +235,7 @@ static void RenderTranslucentBatch(int batch) {
 		if (part.Offset < 0) continue;
 		hasTranParts[batch] = true;
 
-#ifndef CC_BUILD_GL11
+#if !defined CC_BUILD_GL11 || defined CC_BUILD_IRIX
 		Gfx_BindVb_Textured(info->Vb);
 #endif
 
@@ -307,7 +307,7 @@ void MapRenderer_RenderTranslucent(double delta) {
 static void DeleteChunk(struct ChunkInfo* info) {
 	struct ChunkPartInfo* ptr;
 	int i;
-#ifdef CC_BUILD_GL11
+#if defined CC_BUILD_GL11 && !defined CC_BUILD_IRIX
 	int j;
 #else
 	Gfx_DeleteVb(&info->Vb);
@@ -324,7 +324,7 @@ static void DeleteChunk(struct ChunkInfo* info) {
 		for (i = 0; i < MapRenderer_1DUsedCount; i++, ptr += chunksCount) {
 			if (ptr->Offset < 0) continue; 
 			normPartsCount[i]--;
-#ifdef CC_BUILD_GL11
+#if defined CC_BUILD_GL11 && !defined CC_BUILD_IRIX
 			for (j = 0; j < CHUNKPART_MAX_VBS; j++) Gfx_DeleteVb(&ptr->Vbs[j]);
 #endif
 		}
@@ -336,7 +336,7 @@ static void DeleteChunk(struct ChunkInfo* info) {
 		for (i = 0; i < MapRenderer_1DUsedCount; i++, ptr += chunksCount) {
 			if (ptr->Offset < 0) continue;
 			tranPartsCount[i]--;
-#ifdef CC_BUILD_GL11
+#if defined CC_BUILD_GL11 && !defined CC_BUILD_IRIX
 			for (j = 0; j < CHUNKPART_MAX_VBS; j++) Gfx_DeleteVb(&ptr->Vbs[j]);
 #endif
 		}

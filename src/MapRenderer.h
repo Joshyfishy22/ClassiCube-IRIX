@@ -20,7 +20,7 @@ extern struct ChunkPartInfo* MapRenderer_PartsTranslucent;
 
 /* Describes a portion of the data needed for rendering a chunk. */
 struct ChunkPartInfo {
-#ifdef CC_BUILD_GL11
+#if defined CC_BUILD_GL11 && !defined CC_BUILD_IRIX
 	/* 1 VB per face, another VB for sprites */
 	#define CHUNKPART_MAX_VBS (FACE_COUNT + 1)
 	GfxResourceID Vbs[CHUNKPART_MAX_VBS];
@@ -51,7 +51,7 @@ struct ChunkInfo {
 	public cc_bool Visited = false, Occluded = false;
 	public byte OcclusionFlags, OccludedFlags, DistanceFlags;
 #endif
-#ifndef CC_BUILD_GL11
+#if !defined CC_BUILD_GL11 || defined CC_BUILD_IRIX
 	GfxResourceID Vb;
 #endif
 	struct ChunkPartInfo* NormalParts;
