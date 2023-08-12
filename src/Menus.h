@@ -3,9 +3,10 @@
 #include "Core.h"
 
 /* Contains all 2D menu screen implementations.
-   Copyright 2014-2022 ClassiCube | Licensed under BSD-3
+   Copyright 2014-2023 ClassiCube | Licensed under BSD-3
 */
 struct Screen;
+int Menu_InputDown(void* screen, int key);
 int Menu_PointerDown(void* screen, int id, int x, int y);
 int Menu_PointerMove(void* screen, int id, int x, int y);
 
