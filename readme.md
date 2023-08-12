@@ -174,7 +174,7 @@ Install libexecinfo, curl and openal-soft package if needed
 
 #### IRIX
 
-Install Sgug-RSE (https://github.com/sgidevnet/sgug-rse) Install libX11, libgcc, libXau, libXdmcp, libcurl-devel, libGLU, LibGL from SGUG-RSE. Install Nekoware OpenAL (neko_openal-1.1.tardist) for Audio (Can severely impact performace due the lack of .ogg decoding on SGI hardware. Add ```-DCC_BUILD_NOMUSIC``` to the build command to exclude music). Use GCC 9.2 from SGUG-RSE shell to compile. If you have any issues dm me on discord at joshyfishy22
+Install Sgug-RSE (https://github.com/sgidevnet/sgug-rse) Install libX11, libgcc, libXau, libXdmcp, libcurl-devel, libGLU, LibGL from SGUG-RSE. Install Nekoware OpenAL (neko_openal-1.1.tardist) for Audio (Can severely impact performace due the lack of .ogg decoding on SGI hardware. Add ```-DCC_BUILD_NOMUSIC``` to the build command to exclude music). Use GCC 9.2 from SGUG-RSE shell to compile or MIPS Pro compilation (when using the irix64 plat, default by just about every system capable of running this but the O2).. If you have any issues dm me on discord at ```joshyfishy22```.
 
 ```gcc *.c -o ClassiCube -Wl,-rpath-link=/usr/lib32 -Wl,-rpath=/usr/lib32:/usr/sgug/lib32 -lX11 -lGL -lGLcore -lGLU -lpthread -Wl,--allow-shlib-undefined -DCC_BUILD_GL11```
 
@@ -183,10 +183,6 @@ Install Sgug-RSE (https://github.com/sgidevnet/sgug-rse) Install libX11, libgcc,
 Install openal_devel and libexecinfo_devel package if needed
 
 ```cc *.c Window_Haiku.cpp -o ClassiCube -lm -lexecinfo -lGL -lnetwork -lstdc++ -lbe -lgame -ltracker```
-
-#### IRIX
-
-```gcc -lGL -lX11 -lXi -lm -lpthread -ldl```
 
 #### SerenityOS
 
