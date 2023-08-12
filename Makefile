@@ -107,6 +107,13 @@ LIBS=-lGL -lX11 -lXi -lm -lpthread -ldl
 LDFLAGS=-Wl,-rpath-link=/usr/lib32 -Wl,-rpath=/usr/lib32:/usr/sgug/lib32
 endif
 
+ifeq ($(PLAT),irix64)
+CC=c99
+CFLAGS=-O2 -n32 -mips3 -DCC_BUILD_GL11 -DCC_BUILD_NOSOUNDS -DCC_BUILD_NOMUSIC  
+LIBS=-lGL -lX11 -lXi -lm -lpthread -ldl 
+LDFLAGS=-mips3
+endif
+
 ifeq ($(PLAT),psp)
 CC=psp-gcc
 LIBS=-lm -lpspgum -lpspgu -lpspge -lpspdisplay -lpspctrl
@@ -144,6 +151,8 @@ beos:
 	$(MAKE) $(ENAME) PLAT=beos
 serenityos:
 	$(MAKE) $(ENAME) PLAT=serenityos
+irix64:
+	$(MAKE) $(ENAME) PLAT=irix64
 irix:
 	$(MAKE) $(ENAME) PLAT=irix
 psp:

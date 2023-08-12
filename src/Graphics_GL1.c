@@ -1,5 +1,5 @@
 #include "Core.h"
-#if defined CC_BUILD_GL && !defined CC_BUILD_GLMODERN
+#if defined CC_BUILD_GL && !defined CC_BUILD_GLMODERN && !defined CC_BUILD_IRIX
 #include "_GraphicsBase.h"
 #include "Errors.h"
 #include "Logger.h"

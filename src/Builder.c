@@ -93,7 +93,7 @@ static void AddVertices(BlockID block, Face face) {
 	part->fCount[face] += 4;
 }
 
-#ifdef CC_BUILD_GL11
+#if defined CC_BUILD_GL11 && !defined CC_BUILD_IRIX
 static void BuildPartVbs(struct ChunkPartInfo* info) {
 	/* Sprites vertices are stored before chunk face sides */
 	int i, count, offset = info->Offset + info->SpriteCount;
@@ -135,7 +135,7 @@ static void SetPartInfo(struct Builder1DPart* part, int* offset, struct ChunkPar
 	info->Counts[FACE_YMAX] = part->fCount[FACE_YMAX];
 	info->SpriteCount       = part->sCount;
 
-#ifdef CC_BUILD_GL11
+#if defined CC_BUILD_GL11 && !defined CC_BUILD_IRIX
 	BuildPartVbs(info);
 #endif
 }
@@ -370,7 +370,7 @@ static cc_bool BuildChunk(int x1, int y1, int z1, struct ChunkInfo* info) {
 	totalVerts = Builder_TotalVerticesCount();
 	if (!totalVerts) return false;
 
-#ifndef CC_BUILD_GL11
+#if !defined CC_BUILD_GL11 || defined CC_BUILD_IRIX
 	/* add an extra element to fix crashing on some GPUs */
 	Builder_Vertices = (struct VertexTextured*)Gfx_RecreateAndLockVb(&info->Vb,
 													VERTEX_FORMAT_TEXTURED, totalVerts + 1);
@@ -397,7 +397,7 @@ static cc_bool BuildChunk(int x1, int y1, int z1, struct ChunkInfo* info) {
 		}
 	}
 
-#ifndef CC_BUILD_GL11
+#if !defined CC_BUILD_GL11 || defined CC_BUILD_IRIX
 	Gfx_UnlockVb(info->Vb);
 #endif
 	return true;

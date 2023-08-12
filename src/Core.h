@@ -301,7 +301,7 @@ typedef struct cc_string_ {
 Thus it is **NOT SAFE** to allocate a string on the stack. */
 #define STRING_REF
 
-#if defined CC_BUILD_GL
+#if defined CC_BUILD_GL && !defined CC_BUILD_IRIX
 /* NOTE: Although normally OpenGL object/resource IDs are 32 bit integers, */
 /*  OpenGL 1.1 does actually use the full 64 bits for 'dynamic' vertex buffers */
 typedef cc_uintptr GfxResourceID;

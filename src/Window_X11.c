@@ -16,7 +16,13 @@
 #include <stdio.h>
 
 #ifdef CC_BUILD_IRIX
+#define XK_MISCELLANY
+#define XK_LATIN1
+#include <X11/keysymdef.h>
+
+#ifndef GLX_HYPERPIPE_PIPE_NAME_LENGTH_SGIX
 #define GLX_HYPERPIPE_PIPE_NAME_LENGTH_SGIX 80
+#endif
 #endif
 
 #ifdef X_HAVE_UTF8_STRING
@@ -494,10 +500,16 @@ static Atom Window_GetSelectionProperty(XEvent* e) {
 }
 
 static Bool FilterEvent(Display* d, XEvent* e, XPointer w) { 
+#ifdef CC_BUILD_IRIX
+	return
+		e->xany.window == (Window)w ||
+		!e->xany.window; /* KeymapNotify events don't have a window */
+#else
 	return
 		e->xany.window == (Window)w ||
 		!e->xany.window || /* KeymapNotify events don't have a window */
 		e->type == GenericEvent; /* For XInput events */
+#endif
 }
 
 static void HandleWMDestroy(void) {
@@ -528,8 +540,10 @@ void Window_ProcessEvents(void) {
 		if (XFilterEvent(&e, None) == True) continue;
 
 		switch (e.type) {
+#ifndef CC_BUILD_IRIX
 		case GenericEvent:
 			HandleGenericEvent(&e); break;
+#endif
 		case ClientMessage:
 			if (e.xclient.data.l[0] == wm_destroy) {
 				HandleWMDestroy();
@@ -1353,6 +1367,52 @@ static void GetAttribs(struct GraphicsMode* mode, int* attribs, int depth) {
 	attribs[i++] = 0;
 }
 
+#if defined CC_BUILD_IRIX
+static XVisualInfo GLContext_SelectVisual(void) {
+	XVisualInfo template;
+	XVisualInfo *vi_list;
+	XVisualInfo best = {0};
+	int best_rgb_bpp = 0, best_depth_bpp = 0;
+	int vi_count;
+
+	template.screen = DefaultScreen(win_display);
+	vi_list = XGetVisualInfo(win_display, VisualScreenMask, &template, &vi_count);
+	if (!vi_list) return best;
+
+	for (int i = 0; i < vi_count; i++) {
+		int val, res, w = 0;
+		int r_size, g_size, b_size, rgb_bpp;
+		int d_size;
+
+		res = glXGetConfig(win_display, vi_list+i, GLX_USE_GL, &val);
+		if (res || val == False) continue;
+		res = glXGetConfig(win_display, vi_list+i, GLX_RGBA, &val);
+		if (res || val == False) continue;
+		res = glXGetConfig(win_display, vi_list+i, GLX_DOUBLEBUFFER, &val);
+		if (res || val == False) continue;
+
+		glXGetConfig(win_display, vi_list+i, GLX_RED_SIZE, &r_size);
+		glXGetConfig(win_display, vi_list+i, GLX_GREEN_SIZE, &g_size);
+		glXGetConfig(win_display, vi_list+i, GLX_BLUE_SIZE, &b_size);
+		rgb_bpp = r_size+g_size+b_size;
+		if (rgb_bpp > 24) continue;	// No high bpp please...
+
+		glXGetConfig(win_display, vi_list+i, GLX_DEPTH_SIZE, &d_size);
+		if (d_size < 16) continue;	// No baby depth buffers please...
+
+		if (rgb_bpp > best_rgb_bpp && d_size >= best_depth_bpp) {
+printf("Found %d bpp screen with %d bit depth buffer\n", rgb_bpp, d_size);
+			best = vi_list[i];
+			best_rgb_bpp = rgb_bpp;
+			best_depth_bpp = d_size;
+		}
+	}
+
+	XFree(vi_list);
+	return best;
+}
+
+#else
 static XVisualInfo GLContext_SelectVisual(void) {
 	int attribs[20];
 	int major, minor;
@@ -1394,5 +1454,7 @@ static XVisualInfo GLContext_SelectVisual(void) {
 	XFree(visual);
 	return info;
 }
+#endif
+
 #endif
 #endif
