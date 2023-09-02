@@ -50,8 +50,8 @@ void Window_Init(void) {
 	WindowInfo.Focused = true;
 	WindowInfo.Exists  = true;
 
-	Input.GamepadSource = true;
-	irrst_result = irrstInit();
+	Input.Sources = INPUT_SOURCE_GAMEPAD;
+	irrst_result  = irrstInit();
 }
 
 void Window_Create2D(int width, int height) { launcherMode = true;  }
@@ -76,7 +76,7 @@ void Window_Close(void) {
 /*########################################################################################################################*
 *----------------------------------------------------Input processing-----------------------------------------------------*
 *#########################################################################################################################*/
-static void HandleButtons_Game(u32 mods) {
+static void HandleButtons(u32 mods) {
 	Input_SetNonRepeatable(CCPAD_L, mods & KEY_L);
 	Input_SetNonRepeatable(CCPAD_R, mods & KEY_R);
 	
@@ -92,51 +92,22 @@ static void HandleButtons_Game(u32 mods) {
 	Input_SetNonRepeatable(CCPAD_RIGHT,  mods & KEY_DRIGHT);
 	Input_SetNonRepeatable(CCPAD_UP,     mods & KEY_DUP);
 	Input_SetNonRepeatable(CCPAD_DOWN,   mods & KEY_DDOWN);
-}
-
-static void HandleButtons_Launcher(u32 mods) {
-	Input_SetNonRepeatable(CCKEY_ENTER,  mods & KEY_A);
-	Input_SetNonRepeatable(CCKEY_ESCAPE, mods & KEY_B);
-	// fake tab with down for Launcher
-	//Input_SetNonRepeatable(CCKEY_TAB, mods & KEY_DDOWN);
 	
-	Input_SetNonRepeatable(CCPAD_LEFT,   mods & KEY_DLEFT);
-	Input_SetNonRepeatable(CCPAD_RIGHT,  mods & KEY_DRIGHT);
-	Input_SetNonRepeatable(CCPAD_UP,     mods & KEY_DUP);
-	Input_SetNonRepeatable(CCPAD_DOWN,   mods & KEY_DDOWN);
+	Input_SetNonRepeatable(CCPAD_ZL, mods & KEY_ZL);
+	Input_SetNonRepeatable(CCPAD_ZR, mods & KEY_ZR);
 }
 
-static void ProcessJoystickInput(circlePosition* pos) {	
+static void ProcessJoystickInput(circlePosition* pos, double delta) {
+	float scale = (delta * 60.0) / 8.0f;
+	
 	// May not be exactly 0 on actual hardware
-	if (Math_AbsI(pos->dx) <= 4) pos->dx = 0;
-	if (Math_AbsI(pos->dy) <= 4) pos->dy = 0;
+	if (Math_AbsI(pos->dx) <= 8) pos->dx = 0;
+	if (Math_AbsI(pos->dy) <= 8) pos->dy = 0;
 		
-	Event_RaiseRawMove(&PointerEvents.RawMoved, pos->dx / 8.0f, -pos->dy / 8.0f);
+	Event_RaiseRawMove(&PointerEvents.RawMoved, pos->dx * scale, -pos->dy * scale);
 }
 
-void Window_ProcessEvents(double delta) {
-	hidScanInput();
-	/* TODO implement */
-	
-	if (!aptMainLoop()) {
-		Event_RaiseVoid(&WindowEvents.Closing);
-		WindowInfo.Exists = false;
-		return;
-	}
-	
-	//u32 m1 = hidKeysDown(), m2 = hidKeysHeld();
-	//Platform_Log2("MODS: %h | %h", &m1, &m2);
-	// hidKeysDown hidKeysUp
-	//u32 mods = hidKeysDownRepeat();
-	
-	u32 mods = hidKeysDown() | hidKeysHeld();
-	if (launcherMode) {
-		HandleButtons_Launcher(mods);
-	} else {
-		HandleButtons_Game(mods);
-	}
-	Input_SetNonRepeatable(CCMOUSE_L, mods & KEY_TOUCH);
-	
+static void ProcessTouchInput(int mods) {
 	touchPosition touch;
 	hidTouchRead(&touch);
 	touchActive = mods & KEY_TOUCH;
@@ -152,18 +123,35 @@ void Window_ProcessEvents(double delta) {
 		touchBegX = touch.px;
 		touchBegY = touch.py;
 	}
+}
+
+void Window_ProcessEvents(double delta) {
+	hidScanInput();
+	/* TODO implement */
+	
+	if (!aptMainLoop()) {
+		Event_RaiseVoid(&WindowEvents.Closing);
+		WindowInfo.Exists = false;
+		return;
+	}
+	
+	u32 mods = hidKeysDown() | hidKeysHeld();
+	HandleButtons(mods);
+	
+	Input_SetNonRepeatable(CCMOUSE_L, mods & KEY_TOUCH);
+	ProcessTouchInput(mods);
 	
 	if (Input.RawMode) {
 		circlePosition pos;
 		hidCircleRead(&pos);
-		ProcessJoystickInput(&pos);
+		ProcessJoystickInput(&pos, delta);
 	}
 	
 	if (Input.RawMode && irrst_result == 0) {
 		circlePosition pos;
 		irrstScanInput();
 		irrstCstickRead(&pos);
-		ProcessJoystickInput(&pos);
+		ProcessJoystickInput(&pos, delta);
 	}
 }
 
@@ -285,7 +273,6 @@ cc_result Window_OpenFileDialog(const struct OpenFileDialogArgs* args) {
 }
 
 cc_result Window_SaveFileDialog(const struct SaveFileDialogArgs* args) {
-
 	return ERR_NOT_SUPPORTED;
 }
 #endif

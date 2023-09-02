@@ -36,6 +36,8 @@ extern const cc_result ReturnCode_DirectoryExists;
 /* Whether the launcher and game must both be run in the same process */
 /*  (e.g. can't start a separate process on Mobile or Consoles) */
 extern cc_bool Platform_SingleProcess;
+/* Suffix added to app name sent to the server */
+extern const char* Platform_AppNameSuffix;
 
 #ifdef CC_BUILD_WIN
 typedef struct cc_winstring_ {
@@ -85,6 +87,9 @@ extern const struct UpdaterInfo {
 	/* Metadata for the compiled builds available for this platform */
 	const struct UpdaterBuild builds[2]; // TODO name and path
 } Updater_Info;
+/* Whether updating is supported by the platform */
+extern cc_bool Updater_Supported;
+
 /* Attempts to clean up any leftover files from an update */
 cc_bool Updater_Clean(void);
 /* Starts the platform-specific method to update then start the game using the UPDATE_FILE file. */

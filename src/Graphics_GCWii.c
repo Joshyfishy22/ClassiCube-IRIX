@@ -51,6 +51,7 @@ void Gfx_Create(void) {
 	Gfx.MaxTexWidth  = 512;
 	Gfx.MaxTexHeight = 512;
 	Gfx.Created      = true;
+	gfx_vsync        = true;
 	
 	InitGX();
 	Gfx_RestoreState();
@@ -260,7 +261,8 @@ void Gfx_EndFrame(void) {
 	
 	VIDEO_SetNextFramebuffer(xfbs[curFB]);
 	VIDEO_Flush();
-	VIDEO_WaitVSync();
+	
+	if (gfx_vsync) VIDEO_WaitVSync();
 	if (gfx_minFrameMs) LimitFPS();
 }
 

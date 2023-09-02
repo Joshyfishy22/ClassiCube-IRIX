@@ -1,15 +1,16 @@
 PROJECT_TITLE 	:= ClassiCube
-PROJECT_TITLEID := VSDK00007
+PROJECT_TITLEID := CUBE00200
 TARGET 			:= ClassiCube-vita
 
-BUILD_DIR		:= build
+BUILD_DIR		:= build-vita
+SOURCE_DIR		:= src
 
 CFLAGS 	+= -Wl,-q -I../common
-CFILES 	:=$(wildcard src/*.c)
-OBJS 	:= $(addprefix $(BUILD_DIR)/, $(CFILES:src/%.c=%.o))
+C_FILES := $(wildcard $(SOURCE_DIR)/*.c)
+OBJS 	:= $(addprefix $(BUILD_DIR)/, $(C_FILES:$(SOURCE_DIR)/%.c=%.o))
 
 # Needed by psvDebugScreenPrintf
-LIBS += -lm -lSceDisplay_stub -lSceCtrl_stub -lSceGxm_stub
+LIBS += -lm -lSceDisplay_stub -lSceCtrl_stub -lSceTouch_stub -lSceGxm_stub
 
 
 #---------------------------------------------------------------------------------
@@ -21,12 +22,7 @@ $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
 $(TARGET).vpk: eboot.bin param.sfo
-	vita-pack-vpk -s param.sfo -b eboot.bin \
-		--add sce_sys/icon0.png=sce_sys/icon0.png \
-		--add sce_sys/livearea/contents/bg.png=sce_sys/livearea/contents/bg.png \
-		--add sce_sys/livearea/contents/startup.png=sce_sys/livearea/contents/startup.png \
-		--add sce_sys/livearea/contents/template.xml=sce_sys/livearea/contents/template.xml \
-	$(TARGET).vpk
+	vita-pack-vpk -s param.sfo -b eboot.bin $(TARGET).vpk
 
 eboot.bin: $(TARGET).velf
 	vita-make-fself $(TARGET).velf eboot.bin
@@ -45,4 +41,4 @@ $(BUILD_DIR)/%.o : src/%.c
 	arm-vita-eabi-gcc -c $(CFLAGS) -o $@ $<
 
 clean:
-	rm $(PROJECT).velf $(PROJECT).elf $(PROJECT).vpk param.sfo eboot.bin $(OBJS)
+	rm $(TARGET).velf $(TARGET).elf $(TARGET).vpk param.sfo eboot.bin $(OBJS)

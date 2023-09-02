@@ -10,16 +10,18 @@
 #include "Bitmap.h"
 #include "Errors.h"
 #include "ExtMath.h"
+#include "Logger.h"
 #include <vitasdk.h>
 static cc_bool launcherMode;
+static SceTouchPanelInfo frontPanel;
 
 struct _DisplayData DisplayInfo;
 struct _WinData WindowInfo;
-// no DPI scaling on Xbox
+// no DPI scaling on PS Vita
 int Display_ScaleX(int x) { return x; }
 int Display_ScaleY(int y) { return y; }
 
-#define BUFFER_WIDTH  960
+//#define BUFFER_WIDTH  960 TODO: 1024?
 #define SCREEN_WIDTH  960
 #define SCREEN_HEIGHT 544
 
@@ -35,8 +37,12 @@ void Window_Init(void) {
 	WindowInfo.Focused = true;
 	WindowInfo.Exists  = true;
 
-	Input.GamepadSource = true;
+	Input.Sources = INPUT_SOURCE_GAMEPAD;
 	sceCtrlSetSamplingMode(SCE_CTRL_MODE_ANALOG);
+	sceTouchSetSamplingState(SCE_TOUCH_PORT_FRONT, SCE_TOUCH_SAMPLING_STATE_START);
+	sceTouchSetSamplingState(SCE_TOUCH_PORT_BACK,  SCE_TOUCH_SAMPLING_STATE_START);
+	
+	sceTouchGetPanelInfo(SCE_TOUCH_PORT_FRONT, &frontPanel);
 }
 
 void Window_Create2D(int width, int height) { launcherMode = true;  }
@@ -62,49 +68,89 @@ void Window_Close(void) {
 /*########################################################################################################################*
 *----------------------------------------------------Input processing-----------------------------------------------------*
 *#########################################################################################################################*/
-void Window_ProcessEvents(void) {
-	SceCtrlData pad;
-	/* TODO implement */
-	sceCtrlReadBufferPositive(0, &pad, 1);
-	int mods = pad.buttons;
+static void HandleButtons(int mods) {
+	Input_SetNonRepeatable(CCPAD_A, mods & SCE_CTRL_TRIANGLE);
+	Input_SetNonRepeatable(CCPAD_B, mods & SCE_CTRL_SQUARE);
+	Input_SetNonRepeatable(CCPAD_X, mods & SCE_CTRL_CROSS);
+	Input_SetNonRepeatable(CCPAD_Y, mods & SCE_CTRL_CIRCLE);
+      
+	Input_SetNonRepeatable(CCPAD_START,  mods & SCE_CTRL_START);
+	Input_SetNonRepeatable(CCPAD_SELECT, mods & SCE_CTRL_SELECT);
+
+	Input_SetNonRepeatable(CCPAD_LEFT,   mods & SCE_CTRL_LEFT);
+	Input_SetNonRepeatable(CCPAD_RIGHT,  mods & SCE_CTRL_RIGHT);
+	Input_SetNonRepeatable(CCPAD_UP,     mods & SCE_CTRL_UP);
+	Input_SetNonRepeatable(CCPAD_DOWN,   mods & SCE_CTRL_DOWN);
 	
-	int dx = pad.lx - 127;
-	int dy = pad.ly - 127;
-	if (Input_RawMode && (Math_AbsI(dx) > 1 || Math_AbsI(dy) > 1)) {
-		//Platform_Log2("RAW: %i, %i", &dx, &dy);
-		Event_RaiseRawMove(&PointerEvents.RawMoved, dx / 32.0f, dy / 32.0f);
+	Input_SetNonRepeatable(CCPAD_L, mods & SCE_CTRL_LTRIGGER);
+	Input_SetNonRepeatable(CCPAD_R, mods & SCE_CTRL_RTRIGGER);
+}
+
+static void ProcessCircleInput(SceCtrlData* pad, double delta) {
+	float scale = (delta * 60.0) / 16.0f;
+	int dx = pad->lx - 127;
+	int dy = pad->ly - 127;
+	
+	if (Math_AbsI(dx) <= 8) dx = 0;
+	if (Math_AbsI(dy) <= 8) dy = 0;
+	
+	Event_RaiseRawMove(&PointerEvents.RawMoved, dx * scale, dy * scale);
+}
+
+
+static void ProcessTouchPress(int x, int y) {
+	if (!frontPanel.maxDispX || !frontPanel.maxDispY) {
+		// TODO: Shouldn't ever happen? need to check
+		Pointer_SetPosition(0, x, y);
+		return;
 	}
-			
 	
-	Input_SetNonRepeatable(KeyBinds[KEYBIND_PLACE_BLOCK],  mods & SCE_CTRL_LTRIGGER);
-	Input_SetNonRepeatable(KeyBinds[KEYBIND_DELETE_BLOCK], mods & SCE_CTRL_RTRIGGER);
+	// rescale from touch range to screen range
+	x = (x - frontPanel.minDispX) * SCREEN_WIDTH  / frontPanel.maxDispX;
+	y = (y - frontPanel.minDispY) * SCREEN_HEIGHT / frontPanel.maxDispY;
+	Pointer_SetPosition(0, x, y);
+}
+
+static void ProcessTouchInput(void) {
+	SceTouchData touch;
 	
-	Input_SetNonRepeatable(KeyBinds[KEYBIND_JUMP],      mods & SCE_CTRL_TRIANGLE);
-	Input_SetNonRepeatable(KeyBinds[KEYBIND_CHAT],      mods & SCE_CTRL_CIRCLE);
-	Input_SetNonRepeatable(KeyBinds[KEYBIND_INVENTORY], mods & SCE_CTRL_CROSS);
-	// PSP_CTRL_SQUARE
+	// sceTouchRead is blocking (seems to block until vblank), and don't want that
+	int res = sceTouchPeek(SCE_TOUCH_PORT_FRONT, &touch, 1);
+	if (res == 0) return; // no data available yet
+	if (res < 0)  return; // error occurred
 	
-	Input_SetNonRepeatable(IPT_ENTER,  mods & SCE_CTRL_START);
-	Input_SetNonRepeatable(IPT_ESCAPE, mods & SCE_CTRL_SELECT);
-	// fake tab with PSP_CTRL_SQUARE for Launcher too
-	Input_SetNonRepeatable(IPT_TAB,    mods & SCE_CTRL_SQUARE);
+	if (touch.reportNum > 0) {
+		int x = touch.report[0].x;
+		int y = touch.report[0].y;
+		ProcessTouchPress(X, Y);
+	}
+	Input_SetNonRepeatable(CCMOUSE_L, touch.reportNum > 0);
+}
+
+static void ProcessPadInput(double delta) {
+	SceCtrlData pad;
 	
-	Input_SetNonRepeatable(KeyBinds[KEYBIND_LEFT],  mods & SCE_CTRL_LEFT);
-	Input_SetNonRepeatable(IPT_LEFT,                mods & SCE_CTRL_LEFT);
-	Input_SetNonRepeatable(KeyBinds[KEYBIND_RIGHT], mods & SCE_CTRL_RIGHT);
-	Input_SetNonRepeatable(IPT_RIGHT,               mods & SCE_CTRL_RIGHT);
+	// sceCtrlReadBufferPositive is blocking (seems to block until vblank), and don't want that
+	int res = sceCtrlPeekBufferPositive(0, &pad, 1);
+	if (res == 0) return; // no data available yet
+	if (res < 0)  return; // error occurred
 	
-	Input_SetNonRepeatable(KeyBinds[KEYBIND_FORWARD], mods & SCE_CTRL_UP);
-	Input_SetNonRepeatable(IPT_UP,                    mods & SCE_CTRL_UP);
-	Input_SetNonRepeatable(KeyBinds[KEYBIND_BACK],    mods & SCE_CTRL_DOWN);
-	Input_SetNonRepeatable(IPT_DOWN,                  mods & SCE_CTRL_DOWN);
+	HandleButtons(pad.buttons);
+	if (Input.RawMode)
+		ProcessCircleInput(&pad, delta);
+}
+
+void Window_ProcessEvents(double delta) {
+	/* TODO implement */
+	ProcessPadInput(delta);
+	ProcessTouchInput();
 }
 
 void Cursor_SetPosition(int x, int y) { } // Makes no sense for PS Vita
 
-void Window_EnableRawMouse(void)  { Input_RawMode = true; }
+void Window_EnableRawMouse(void)  { Input.RawMode = true; }
 void Window_UpdateRawMouse(void)  {  }
-void Window_DisableRawMouse(void) { Input_RawMode = false; }
+void Window_DisableRawMouse(void) { Input.RawMode = false; }
 
 
 /*########################################################################################################################*
@@ -116,35 +162,30 @@ void Window_AllocFramebuffer(struct Bitmap* bmp) {
 	fb_bmp     = *bmp;
 }
 
-#define ALIGNUP(size, a) (((size) + ((a) - 1)) & ~((a) - 1))
+extern void* AllocGPUMemory(int size, int type, int gpu_access, SceUID* ret_uid);
+
 void Window_DrawFramebuffer(Rect2D r) {
 	static SceUID fb_uid;
 	static void* fb;
-	// TODO: Purge when closing the 2D window, so more memory for 3D ClassiCube
-	if (!fb) {
-		int size = ALIGNUP(4 * BUFFER_WIDTH * SCREEN_HEIGHT, 256 * 1024);
-		// https://wiki.henkaku.xyz/vita/SceSysmem
-		fb_uid   = sceKernelAllocMemBlock("CC Framebuffer", SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, size, NULL);
-		if (fb_uid < 0) Logger_Abort2(fb_uid, "Failed to allocate 2D framebuffer");
-		
-		int res1 = sceKernelGetMemBlockBase(fb_uid, &fb);
-		if (res1 < 0) Logger_Abort2(res1, "Failed to get base of 2D framebuffer");
-		
-		int res2 = sceGxmMapMemory(fb, size, SCE_GXM_MEMORY_ATTRIB_READ | SCE_GXM_MEMORY_ATTRIB_WRITE);
-		if (res1 < 0) Logger_Abort2(res2, "Failed to map framebuffer for GPU usage");
-		// https://wiki.henkaku.xyz/vita/GPU
-	}
 	
+	// TODO: Purge when closing the 2D window, so more memory for 3D ClassiCube
+	// TODO: Use framebuffers directly instead of our own internal framebuffer too..
+	if (!fb) {
+		int size = 4 * SCREEN_WIDTH * SCREEN_HEIGHT;
+		fb = AllocGPUMemory(size, SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, 
+							SCE_GXM_MEMORY_ATTRIB_RW, &fb_uid);
+	}
+		
 	sceDisplayWaitVblankStart();
 	
 	SceDisplayFrameBuf framebuf = { 0 };
 	framebuf.size        = sizeof(SceDisplayFrameBuf);
 	framebuf.base        = fb;
-	framebuf.pitch       = BUFFER_WIDTH * 4;
+	framebuf.pitch       = SCREEN_WIDTH;
 	framebuf.pixelformat = SCE_DISPLAY_PIXELFORMAT_A8B8G8R8;
 	framebuf.width       = SCREEN_WIDTH;
 	framebuf.height      = SCREEN_HEIGHT;
-	
+
 	sceDisplaySetFrameBuf(&framebuf, SCE_DISPLAY_SETBUF_NEXTFRAME);
 
 	cc_uint32* src = (cc_uint32*)fb_bmp.scan0 + r.X;
@@ -152,30 +193,13 @@ void Window_DrawFramebuffer(Rect2D r) {
 
 	for (int y = r.Y; y < r.Y + r.Height; y++) 
 	{
-		Mem_Copy(dst + y * BUFFER_WIDTH, src + y * fb_bmp.width, r.Width * 4);
+		Mem_Copy(dst + y * SCREEN_WIDTH, src + y * fb_bmp.width, r.Width * 4);
 	}
 }
 
 void Window_FreeFramebuffer(struct Bitmap* bmp) {
 	Mem_Free(bmp->scan0);
 }
-
-/*void Window_AllocFramebuffer(struct Bitmap* bmp) {
-	void* fb = sceGeEdramGetAddr();
-	bmp->scan0  = fb;
-	bmp->width  = BUFFER_WIDTH;
-	bmp->height = SCREEN_HEIGHT;
-}
-
-void Window_DrawFramebuffer(Rect2D r) {
-	//sceDisplayWaitVblankStart();
-	//sceDisplaySetMode(0, SCREEN_WIDTH, SCREEN_HEIGHT);
-	//sceDisplaySetFrameBuf(sceGeEdramGetAddr(), BUFFER_WIDTH, PSP_DISPLAY_PIXEL_FORMAT_8888, PSP_DISPLAY_SETBUF_IMMEDIATE);
-}
-
-void Window_FreeFramebuffer(struct Bitmap* bmp) {
-
-}*/
 
 
 /*########################################################################################################################*

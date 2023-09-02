@@ -8,6 +8,7 @@
 #include "Utils.h"
 #include "Errors.h"
 #include "PackedCol.h"
+
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,37 +25,18 @@
 #ifdef HW_RVL
 #include <ogc/wiilaunch.h>
 #endif
+#include "_PlatformConsole.h"
 
 const cc_result ReturnCode_FileShareViolation = 1000000000; /* TODO: not used apparently */
 const cc_result ReturnCode_FileNotFound     = ENOENT;
 const cc_result ReturnCode_SocketInProgess  = -EINPROGRESS; // net_XYZ error results are negative
 const cc_result ReturnCode_SocketWouldBlock = -EWOULDBLOCK;
 const cc_result ReturnCode_DirectoryExists  = EEXIST;
-
-
-/*########################################################################################################################*
-*---------------------------------------------------------Memory----------------------------------------------------------*
-*#########################################################################################################################*/
-void Mem_Set(void*  dst, cc_uint8 value,  cc_uint32 numBytes) { memset(dst, value, numBytes); }
-void Mem_Copy(void* dst, const void* src, cc_uint32 numBytes) { memcpy(dst, src,   numBytes); }
-
-void* Mem_TryAlloc(cc_uint32 numElems, cc_uint32 elemsSize) {
-	cc_uint32 size = CalcMemSize(numElems, elemsSize);
-	return size ? malloc(size) : NULL;
-}
-
-void* Mem_TryAllocCleared(cc_uint32 numElems, cc_uint32 elemsSize) {
-	return calloc(numElems, elemsSize);
-}
-
-void* Mem_TryRealloc(void* mem, cc_uint32 numElems, cc_uint32 elemsSize) {
-	cc_uint32 size = CalcMemSize(numElems, elemsSize);
-	return size ? realloc(mem, size) : NULL;
-}
-
-void Mem_Free(void* mem) {
-	if (mem) free(mem);
-}
+#ifdef HW_RVL
+const char* Platform_AppNameSuffix = " Wii";
+#else
+const char* Platform_AppNameSuffix = " GameCube";
+#endif
 
 
 /*########################################################################################################################*
@@ -113,7 +95,6 @@ cc_uint64 Stopwatch_ElapsedMicroseconds(cc_uint64 beg, cc_uint64 end) {
 /*########################################################################################################################*
 *-----------------------------------------------------Directory/File------------------------------------------------------*
 *#########################################################################################################################*/
-void Directory_GetCachePath(cc_string* path) { }
 static char root_buffer[NATIVE_STR_LEN];
 static cc_string root_path = String_FromArray(root_buffer);
 
@@ -377,12 +358,6 @@ void Waitable_WaitFor(void* handle, cc_uint32 milliseconds) {
 
 
 /*########################################################################################################################*
-*--------------------------------------------------------Font/Text--------------------------------------------------------*
-*#########################################################################################################################*/
-void Platform_LoadSysFonts(void) { }
-
-
-/*########################################################################################################################*
 *---------------------------------------------------------Socket----------------------------------------------------------*
 *#########################################################################################################################*/
 union SocketAddress {
@@ -393,16 +368,19 @@ union SocketAddress {
 static int ParseHost(union SocketAddress* addr, const char* host) {
 #ifdef HW_RVL
 	struct hostent* res = net_gethostbyname(host);
+	// avoid confusion with SSL error codes
+	// e.g. FFFF FFF7 > FF00 FFF7
+	if (!res) return -0xFF0000 + errno;
 	
-	if (!res || res->h_addrtype != AF_INET) return false;
 	// Must have at least one IPv4 address
-	if (!res->h_addr_list[0]) return false;
+	if (res->h_addrtype != AF_INET) return ERR_INVALID_ARGUMENT;
+	if (!res->h_addr_list[0])       return ERR_INVALID_ARGUMENT;
 
 	addr->v4.sin_addr = *(struct in_addr*)res->h_addr_list[0];
-	return true;
+	return 0;
 #else
 	// DNS resolution not implemented in gamecube libbba
-	return false;
+	return ERR_NOT_SUPPORTED;
 #endif
 }
 
@@ -410,20 +388,21 @@ static int ParseAddress(union SocketAddress* addr, const cc_string* address) {
 	char str[NATIVE_STR_LEN];
 	String_EncodeUtf8(str, address);
 
-	if (inet_aton(str, &addr->v4.sin_addr) > 0) return true;
+	if (inet_aton(str, &addr->v4.sin_addr) > 0) return 0;
 	return ParseHost(addr, str);
 }
 
 int Socket_ValidAddress(const cc_string* address) {
 	union SocketAddress addr;
-	return ParseAddress(&addr, address);
+	return ParseAddress(&addr, address) == 0;
 }
 
 cc_result Socket_Connect(cc_socket* s, const cc_string* address, int port, cc_bool nonblocking) {
 	union SocketAddress addr;
+	int res;
 
 	*s = -1;
-	if (!ParseAddress(&addr, address)) return ERR_INVALID_ARGUMENT;
+	if ((res = ParseAddress(&addr, address))) return res;
 
 	*s = net_socket(AF_INET, SOCK_STREAM, 0);
 	if (*s < 0) return *s;
@@ -436,7 +415,7 @@ cc_result Socket_Connect(cc_socket* s, const cc_string* address, int port, cc_bo
 	addr.v4.sin_family = AF_INET;
 	addr.v4.sin_port   = htons(port);
 
-	int res = net_connect(*s, &addr.raw, sizeof(addr.v4));
+	res = net_connect(*s, &addr.raw, sizeof(addr.v4));
 	return res < 0 ? res : 0;
 }
 
@@ -529,57 +508,8 @@ static void InitSockets(void) {
 
 
 /*########################################################################################################################*
-*-----------------------------------------------------Process/Module------------------------------------------------------*
+*--------------------------------------------------------Platform---------------------------------------------------------*
 *#########################################################################################################################*/
-static char gameArgs[GAME_MAX_CMDARGS][STRING_SIZE];
-static int gameNumArgs;
-static cc_bool gameHasArgs;
-cc_result Process_StartGame2(const cc_string* args, int numArgs) {
-	for (int i = 0; i < numArgs; i++) 
-	{
-		String_CopyToRawArray(gameArgs[i], &args[i]);
-	}
-	
-	Platform_LogConst("START GAME");
-	gameHasArgs = true;
-	gameNumArgs = numArgs;
-	return 0;
-}
-static int GetGameArgs(cc_string* args) {
-	int count = gameNumArgs;
-	for (int i = 0; i < count; i++) 
-	{
-		args[i] = String_FromRawArray(gameArgs[i]);
-	}
-	
-	// clear arguments so after game is closed, launcher is started
-	gameNumArgs = 0;
-	return count;
-}
-int Platform_GetCommandLineArgs(int argc, STRING_REF char** argv, cc_string* args) {
-	if (gameHasArgs) return GetGameArgs(args);
-	// GC/WII *sometimes* doesn't use argv[0] for program name and so argc will be 0
-	if (!argc) return 0;
-	
-	// at least The Homebrew Channel loader uses argv[0] for executable filename
-	//  see strcpy(result->args, filename); in loader_load in loader.c
-	//  https://github.com/fail0verflow/hbc/blob/master/channel/channelapp/source/loader.c#L912
-	argc--; argv++;
-
-	int count = min(argc, GAME_MAX_CMDARGS);
-	for (int i = 0; i < count; i++) 
-	{
-		args[i] = String_FromReadonly(argv[i]);
-	}
-	return count;
-}
-
-cc_result Platform_SetDefaultCurrentDirectory(int argc, char **argv) {
-	return 0;
-}
-
-void Process_Exit(cc_result code) { exit(code); }
-
 #ifdef HW_RVL
 cc_result Process_StartOpen(const cc_string* args) {
 	char url[NATIVE_STR_LEN];
@@ -594,56 +524,9 @@ cc_result Process_StartOpen(const cc_string* args) {
 }
 #endif
 
-
-/*########################################################################################################################*
-*--------------------------------------------------------Updater----------------------------------------------------------*
-*#########################################################################################################################*/
-const char* const Updater_D3D9 = NULL;
-cc_bool Updater_Clean(void) { return true; }
-
-const struct UpdaterInfo Updater_Info = { "&eCompile latest source code to update", 0 };
-
-cc_result Updater_Start(const char** action) {
-	*action = "Starting game";
-	return ERR_NOT_SUPPORTED;
-}
-
-cc_result Updater_GetBuildTime(cc_uint64* timestamp) {
-	return ERR_NOT_SUPPORTED;
-}
-
-cc_result Updater_MarkExecutable(void) {
-	return ERR_NOT_SUPPORTED;
-}
-
-cc_result Updater_SetNewBuildTime(cc_uint64 timestamp) {
-	return ERR_NOT_SUPPORTED;
-}
-
-
-/*########################################################################################################################*
-*-------------------------------------------------------Dynamic lib-------------------------------------------------------*
-*#########################################################################################################################*/
-/* TODO can this actually be supported somehow */
-const cc_string DynamicLib_Ext = String_FromConst(".so");
-
-void* DynamicLib_Load2(const cc_string* path)      { return NULL; }
-void* DynamicLib_Get2(void* lib, const char* name) { return NULL; }
-
-cc_bool DynamicLib_DescribeError(cc_string* dst) {
-	String_AppendConst(dst, "Dynamic linking unsupported");
-	return true;
-}
-
-
-/*########################################################################################################################*
-*--------------------------------------------------------Platform---------------------------------------------------------*
-*#########################################################################################################################*/
 static void AppendDevice(cc_string* path, char* cwd) {
 	// try to find device FAT mounted on, otherwise default to SD card
-	if (!cwd) {
-		String_AppendConst(path, "sd"); return;
-	}
+	if (!cwd) { String_AppendConst(path, "sd"); return;	}
 	
 	Platform_Log1("CWD: %c", cwd);
 	cc_string cwd_ = String_FromReadonly(cwd);
@@ -677,8 +560,6 @@ static void CreateRootDirectory(void) {
 }
 
 void Platform_Init(void) {
-	Platform_SingleProcess = true;
-	
 	fat_available = fatInitDefault();
 	FindRootDirectory();
 	CreateRootDirectory();
@@ -708,10 +589,16 @@ cc_bool Platform_DescribeError(cc_result res, cc_string* dst) {
 /*########################################################################################################################*
 *-------------------------------------------------------Encryption--------------------------------------------------------*
 *#########################################################################################################################*/
-cc_result Platform_Encrypt(const void* data, int len, cc_string* dst) {
+#if defined HW_RVL
+#include <ogc/es.h>
+
+static cc_result GetMachineID(cc_uint32* key) {
+	return ES_GetDeviceID(key);
+}
+#else
+static cc_result GetMachineID(cc_uint32* key) {
 	return ERR_NOT_SUPPORTED;
 }
-cc_result Platform_Decrypt(const void* data, int len, cc_string* dst) {
-	return ERR_NOT_SUPPORTED;
-}
+#endif
+
 #endif

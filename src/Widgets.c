@@ -512,15 +512,32 @@ static int HotbarWidget_MapKey(int key) {
 	int i;
 	for (i = 0; i < INVENTORY_BLOCKS_PER_HOTBAR; i++)
 	{
-		if (key == KeyBinds[KEYBIND_HOTBAR_1 + i]) return i;
+		if (KeyBind_Claims(KEYBIND_HOTBAR_1 + i, key)) return i;
 	}
 	return -1;
+}
+
+static int HotbarWidget_CycleIndex(int dir) {
+	Inventory.SelectedIndex += dir;
+	if (Inventory.SelectedIndex < 0) 
+		Inventory.SelectedIndex += INVENTORY_BLOCKS_PER_HOTBAR;
+	if (Inventory.SelectedIndex >= INVENTORY_BLOCKS_PER_HOTBAR)
+		Inventory.SelectedIndex -= INVENTORY_BLOCKS_PER_HOTBAR;
+
+	return true;
 }
 
 static int HotbarWidget_KeyDown(void* widget, int key) {
 	struct HotbarWidget* w = (struct HotbarWidget*)widget;
 	int index = HotbarWidget_MapKey(key);
-	if (index == -1) return false;
+
+	if (index == -1) {
+		if (KeyBind_Claims(KEYBIND_HOTBAR_LEFT, key))
+			return HotbarWidget_CycleIndex(-1);
+		if (KeyBind_Claims(KEYBIND_HOTBAR_RIGHT, key))
+			return HotbarWidget_CycleIndex(+1);
+		return false;
+	}
 
 	if (KeyBind_IsPressed(KEYBIND_HOTBAR_SWITCH)) {
 		/* Pick from first to ninth row */
@@ -538,7 +555,7 @@ static void HotbarWidget_InputUp(void* widget, int key) {
 	     a) user presses alt then number
 	     b) user presses alt
 	   We only do case b) if case a) did not happen */
-	if (key != KeyBinds[KEYBIND_HOTBAR_SWITCH]) return;
+	if (!KeyBind_Claims(KEYBIND_HOTBAR_SWITCH, key)) return;
 	if (w->altHandled) { w->altHandled = false; return; } /* handled already */
 
 	/* Don't switch hotbar when alt+tabbing to another window */
@@ -1615,13 +1632,12 @@ static cc_bool TextInputWidget_AllowedChar(void* widget, char c) {
 
 static int TextInputWidget_PointerDown(void* widget, int id, int x, int y) {
 	struct TextInputWidget* w = (struct TextInputWidget*)widget;
-#ifdef CC_BUILD_TOUCH
 	struct OpenKeyboardArgs args;
 
 	OpenKeyboardArgs_Init(&args, &w->base.text, w->onscreenType);
 	args.placeholder = w->onscreenPlaceholder;
 	Window_OpenKeyboard(&args);
-#endif
+
 	w->base.showCaret = true;
 	return InputWidget_PointerDown(widget, id, x, y);
 }

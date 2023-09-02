@@ -47,7 +47,7 @@ enum InputButtons {
 
 	CCPAD_A, CCPAD_B, CCPAD_X, CCPAD_Y, CCPAD_L, CCPAD_R,
 	CCPAD_LEFT, CCPAD_RIGHT, CCPAD_UP, CCPAD_DOWN,
-	CCPAD_START, CCPAD_SELECT,
+	CCPAD_START, CCPAD_SELECT, CCPAD_ZL, CCPAD_ZR,
 
 	INPUT_COUNT,
 
@@ -62,13 +62,16 @@ extern struct _InputState {
 	cc_bool Pressed[INPUT_COUNT];
 	/* Whether raw mouse/touch input is currently being listened for */
 	cc_bool RawMode;
-	/* Whether a gamepad is available as an input source */
-	cc_bool GamepadSource;
+	/* Sources available for input (Mouse/Keyboard, Gamepad) */
+	cc_uint8 Sources;
 	/* Whether a gamepad joystick is being used to control player movement */
 	cc_bool JoystickMovement;
 	/* Angle of the gamepad joystick being used to control player movement */
 	float JoystickAngle;
 } Input;
+
+#define INPUT_SOURCE_NORMAL  (1 << 0)
+#define INPUT_SOURCE_GAMEPAD (1 << 1)
 
 /* Sets Input_Pressed[key] to true and raises InputEvents.Down */
 void Input_SetPressed(int key);
@@ -90,7 +93,9 @@ void Input_Clear(void);
 #define Input_IsDownButton(btn)   ((btn) == CCKEY_DOWN   || (btn) == CCPAD_DOWN)
 #define Input_IsLeftButton(btn)   ((btn) == CCKEY_LEFT   || (btn) == CCPAD_LEFT)
 #define Input_IsRightButton(btn)  ((btn) == CCKEY_RIGHT  || (btn) == CCPAD_RIGHT)
+
 #define Input_IsEnterButton(btn)  ((btn) == CCKEY_ENTER  || (btn) == CCPAD_START || (btn) == CCKEY_KP_ENTER)
+#define Input_IsPauseButton(btn)  ((btn) == CCKEY_ESCAPE || (btn) == CCPAD_START || (btn) == CCKEY_PAUSE)
 #define Input_IsEscapeButton(btn) ((btn) == CCKEY_ESCAPE || (btn) == CCPAD_SELECT)
 
 #if defined CC_BUILD_HAIKU
@@ -154,22 +159,27 @@ enum KeyBind_ {
 	KEYBIND_HOTBAR_1, KEYBIND_HOTBAR_2, KEYBIND_HOTBAR_3,
 	KEYBIND_HOTBAR_4, KEYBIND_HOTBAR_5, KEYBIND_HOTBAR_6,
 	KEYBIND_HOTBAR_7, KEYBIND_HOTBAR_8, KEYBIND_HOTBAR_9,
+	KEYBIND_HOTBAR_LEFT, KEYBIND_HOTBAR_RIGHT,
 	KEYBIND_COUNT
 };
 typedef int KeyBind;
 
-/* The keys that are bound to each key binding. */
-extern cc_uint8 KeyBinds[KEYBIND_COUNT];
+/* The keyboard/mouse buttons that are bound to each key binding */
+extern cc_uint8 KeyBinds_Normal[KEYBIND_COUNT];
+/* The gamepad buttons that are bound to each key binding */
+extern cc_uint8 KeyBinds_Gamepad[KEYBIND_COUNT];
 /* Default keyboard/mouse button that each key binding is bound to */
 extern const cc_uint8 KeyBind_NormalDefaults[KEYBIND_COUNT];
 /* Default gamepad button that each key binding is bound to */
 extern const cc_uint8 KeyBind_GamepadDefaults[KEYBIND_COUNT];
 #define KeyBind_GetDefaults() (Input.GamepadSource ? KeyBind_GamepadDefaults : KeyBind_NormalDefaults)
 
+/* Whether the given keyboard/mouse or gamepad button is bound to the given keybinding */
+#define KeyBind_Claims(binding, btn) (KeyBinds_Normal[binding] == (btn) || KeyBinds_Gamepad[binding] == (btn))
 /* Gets whether the key bound to the given key binding is pressed. */
 CC_API cc_bool KeyBind_IsPressed(KeyBind binding);
 /* Set the key that the given key binding is bound to. (also updates options list) */
-void KeyBind_Set(KeyBind binding, int key);
+void KeyBind_Set(KeyBind binding, int key, cc_uint8* binds);
 
 /* whether to leave text input open for user to enter further input */
 #define HOTKEY_FLAG_STAYS_OPEN   0x01

@@ -36,6 +36,8 @@ const cc_result ReturnCode_FileNotFound     = _ENOENT;
 const cc_result ReturnCode_SocketInProgess  = _EINPROGRESS;
 const cc_result ReturnCode_SocketWouldBlock = _EAGAIN;
 const cc_result ReturnCode_DirectoryExists  = _EEXIST;
+const char* Platform_AppNameSuffix = "";
+cc_bool Platform_SingleProcess;
 
 
 /*########################################################################################################################*
@@ -71,6 +73,12 @@ cc_uint64 Stopwatch_ElapsedMicroseconds(cc_uint64 beg, cc_uint64 end) {
 	return end - beg;
 }
 
+cc_uint64 Stopwatch_Measure(void) {
+	/* time is a milliseconds double */
+	/*  convert to microseconds */
+	return (cc_uint64)(emscripten_get_now() * 1000);
+}
+
 extern void interop_Log(const char* msg, int len);
 void Platform_Log(const char* msg, int len) {
 	interop_Log(msg, len);
@@ -86,12 +94,6 @@ TimeMS DateTime_CurrentUTC_MS(void) {
 extern void interop_GetLocalTime(struct DateTime* t);
 void DateTime_CurrentLocal(struct DateTime* t) {
 	interop_GetLocalTime(t);
-}
-
-cc_uint64 Stopwatch_Measure(void) {
-	/* time is a milliseconds double */
-	/*  convert to microseconds */
-	return (cc_uint64)(emscripten_get_now() * 1000);
 }
 
 

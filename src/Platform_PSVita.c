@@ -1,6 +1,5 @@
 #include "Core.h"
 #if defined CC_BUILD_PSVITA
-
 #include "_PlatformBase.h"
 #include "Stream.h"
 #include "ExtMath.h"
@@ -8,42 +7,21 @@
 #include "Window.h"
 #include "Utils.h"
 #include "Errors.h"
+
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 #include <vitasdk.h>
+#include "_PlatformConsole.h"
 
 const cc_result ReturnCode_FileShareViolation = 1000000000; // not used
 const cc_result ReturnCode_FileNotFound     = ENOENT;
 const cc_result ReturnCode_SocketInProgess  = SCE_NET_ERROR_EINPROGRESS;
 const cc_result ReturnCode_SocketWouldBlock = SCE_NET_ERROR_EWOULDBLOCK;
 const cc_result ReturnCode_DirectoryExists  = EEXIST;
+const char* Platform_AppNameSuffix = " PS Vita";
 static int epoll_id;
-
-
-/*########################################################################################################################*
-*---------------------------------------------------------Memory----------------------------------------------------------*
-*#########################################################################################################################*/
-void Mem_Set(void*  dst, cc_uint8 value,  cc_uint32 numBytes) { memset(dst, value, numBytes); }
-void Mem_Copy(void* dst, const void* src, cc_uint32 numBytes) { memcpy(dst, src,   numBytes); }
-
-void* Mem_TryAlloc(cc_uint32 numElems, cc_uint32 elemsSize) {
-	cc_uint32 size = CalcMemSize(numElems, elemsSize);
-	return size ? malloc(size) : NULL;
-}
-
-void* Mem_TryAllocCleared(cc_uint32 numElems, cc_uint32 elemsSize) {
-	return calloc(numElems, elemsSize);
-}
-
-void* Mem_TryRealloc(void* mem, cc_uint32 numElems, cc_uint32 elemsSize) {
-	cc_uint32 size = CalcMemSize(numElems, elemsSize);
-	return size ? realloc(mem, size) : NULL;
-}
-
-void Mem_Free(void* mem) {
-	if (mem) free(mem);
-}
+static int stdout_fd;
 
 
 /*########################################################################################################################*
@@ -55,15 +33,8 @@ cc_uint64 Stopwatch_ElapsedMicroseconds(cc_uint64 beg, cc_uint64 end) {
 }
 
 void Platform_Log(const char* msg, int len) {
-	int fd = sceKernelGetStdout();
-	sceIoWrite(fd, msg, len);
-	sceIoWrite(fd, "\n",  1);
-	
-	//sceIoDevctl("emulator:", 2, msg, len, NULL, 0);
-	//cc_string str = String_Init(msg, len, len);
-	//cc_file file = 0;
-	//File_Open(&file, &str);
-	//File_Close(file);	
+	if (!stdout_fd) stdout_fd = sceKernelGetStdout();
+	sceIoWrite(stdout_fd, msg, len);
 }
 
 #define UnixTime_TotalMS(time) ((cc_uint64)time.sec * 1000 + UNIX_EPOCH + (time.usec / 1000))
@@ -97,13 +68,11 @@ cc_uint64 Stopwatch_Measure(void) {
 /*########################################################################################################################*
 *-----------------------------------------------------Directory/File------------------------------------------------------*
 *#########################################################################################################################*/
-void Directory_GetCachePath(cc_string* path) { }
+static const cc_string root_path = String_FromConst("ux0:data/ClassiCube/");
 
-extern int __path_absolute(const char *in, char *out, int len);
 static void GetNativePath(char* str, const cc_string* path) {
-	static const char root_path[20] = "ux0:data/ClassiCube/";
-	Mem_Copy(str, root_path, sizeof(root_path));
-	str += sizeof(root_path);
+	Mem_Copy(str, root_path.buffer, root_path.length);
+	str += root_path.length;
 	String_EncodeUtf8(str, path);
 }
 
@@ -317,26 +286,25 @@ union SocketAddress {
 };
 
 static int ParseHost(union SocketAddress* addr, const char* host) {
-	int rid, ret;
+	int rid = sceNetResolverCreate("CC resolver", NULL, 0);
+	if (rid < 0) return ERR_INVALID_ARGUMENT;
 
-	if ((rid = sceNetResolverCreate("CC resolver", NULL, 0)) < 0) return 0;
-
-	ret = sceNetResolverStartNtoa(rid, host, &addr->v4.sin_addr, 1 /* timeout */, 5 /* retries */, 0 /* flags */);
+	int ret = sceNetResolverStartNtoa(rid, host, &addr->v4.sin_addr, 1 /* timeout */, 5 /* retries */, 0 /* flags */);
 	sceNetResolverDestroy(rid);
-	return ret >= 0;
+	return ret;
 }
 
 static int ParseAddress(union SocketAddress* addr, const cc_string* address) {
 	char str[NATIVE_STR_LEN];
 	String_EncodeUtf8(str, address);
 
-	if (sceNetInetPton(SCE_NET_AF_INET, str, &addr->v4.sin_addr) > 0) return true;
+	if (sceNetInetPton(SCE_NET_AF_INET, str, &addr->v4.sin_addr) > 0) return 0;
 	return ParseHost(addr, str);
 }
 
 int Socket_ValidAddress(const cc_string* address) {
 	union SocketAddress addr;
-	return ParseAddress(&addr, address);
+	return ParseAddress(&addr, address) == 0;
 }
 
 cc_result Socket_Connect(cc_socket* s, const cc_string* address, int port, cc_bool nonblocking) {
@@ -344,7 +312,7 @@ cc_result Socket_Connect(cc_socket* s, const cc_string* address, int port, cc_bo
 	int res;
 
 	*s = -1;
-	if (!ParseAddress(&addr, address)) return ERR_INVALID_ARGUMENT;
+	if ((res = ParseAddress(&addr, address))) return res;
 
 	*s = sceNetSocket("CC socket", SCE_NET_AF_INET, SCE_NET_SOCK_STREAM, SCE_NET_IPPROTO_TCP);
 	if (*s < 0) return *s;
@@ -357,12 +325,13 @@ cc_result Socket_Connect(cc_socket* s, const cc_string* address, int port, cc_bo
 	addr.v4.sin_family = SCE_NET_AF_INET;
 	addr.v4.sin_port   = sceNetHtons(port);
 
-	return sceNetConnect(*s, &addr.raw, sizeof(addr.v4));
+	res = sceNetConnect(*s, &addr.raw, sizeof(addr.v4));
+	return res;
 }
 
 cc_result Socket_Read(cc_socket s, cc_uint8* data, cc_uint32 count, cc_uint32* modified) {
 	int recvCount = sceNetRecv(s, data, count, 0);
-	if (recvCount < 0) { *modified = recvCount; return 0; }
+	if (recvCount >= 0) { *modified = recvCount; return 0; }
 	
 	*modified = 0; 
 	return recvCount;
@@ -370,7 +339,7 @@ cc_result Socket_Read(cc_socket s, cc_uint8* data, cc_uint32 count, cc_uint32* m
 
 cc_result Socket_Write(cc_socket s, const cc_uint8* data, cc_uint32 count, cc_uint32* modified) {
 	int sentCount = sceNetSend(s, data, count, 0);
-	if (sentCount < 0) { *modified = sentCount; return 0; }
+	if (sentCount >= 0) { *modified = sentCount; return 0; }
 	
 	*modified = 0; 
 	return sentCount;
@@ -415,111 +384,13 @@ cc_result Socket_CheckWritable(cc_socket s, cc_bool* writable) {
 
 
 /*########################################################################################################################*
-*-----------------------------------------------------Process/Module------------------------------------------------------*
+*--------------------------------------------------------Platform---------------------------------------------------------*
 *#########################################################################################################################*/
-static char gameArgs[GAME_MAX_CMDARGS][STRING_SIZE];
-static int gameNumArgs;
-static cc_bool gameHasArgs;
-
-cc_result Process_StartGame2(const cc_string* args, int numArgs) {
-	for (int i = 0; i < numArgs; i++) 
-	{
-		String_CopyToRawArray(gameArgs[i], &args[i]);
-	}
-	
-	Platform_LogConst("START GAME");
-	gameHasArgs = true;
-	gameNumArgs = numArgs;
-	return 0;
-}
-
-static int GetGameArgs(cc_string* args) {
-	int count = gameNumArgs;
-	for (int i = 0; i < count; i++) 
-	{
-		args[i] = String_FromRawArray(gameArgs[i]);
-	}
-	
-	// clear arguments so after game is closed, launcher is started
-	gameNumArgs = 0;
-	return count;
-}
-
-int Platform_GetCommandLineArgs(int argc, STRING_REF char** argv, cc_string* args) {
-	if (gameHasArgs) return GetGameArgs(args);
-	// PS VITA *sometimes* doesn't use argv[0] for program name and so argc will be 0
-	if (!argc) return 0;
-	
-	argc--; argv++; // skip executable path argument
-
-	int count = min(argc, GAME_MAX_CMDARGS);
-	Platform_Log1("ARGS: %i", &count);
-	
-	for (int i = 0; i < count; i++) 
-	{
-		args[i] = String_FromReadonly(argv[i]);
-		Platform_Log2("  ARG %i = %c", &i, argv[i]);
-	}
-	return count;
-}
-
-cc_result Platform_SetDefaultCurrentDirectory(int argc, char **argv) {
-	return 0; // TODO switch to RomFS ??
-}
-
-void Process_Exit(cc_result code) { exit(code); }
-
 cc_result Process_StartOpen(const cc_string* args) {
 	return ERR_NOT_SUPPORTED;
 }
 
-
-/*########################################################################################################################*
-*--------------------------------------------------------Updater----------------------------------------------------------*
-*#########################################################################################################################*/
-const char* const Updater_D3D9 = NULL;
-cc_bool Updater_Clean(void) { return true; }
-
-const struct UpdaterInfo Updater_Info = { "&eCompile latest source code to update", 0 };
-
-cc_result Updater_Start(const char** action) {
-	*action = "Starting game";
-	return ERR_NOT_SUPPORTED;
-}
-
-cc_result Updater_GetBuildTime(cc_uint64* timestamp) {
-	return ERR_NOT_SUPPORTED;
-}
-
-cc_result Updater_MarkExecutable(void) {
-	return ERR_NOT_SUPPORTED;
-}
-
-cc_result Updater_SetNewBuildTime(cc_uint64 timestamp) {
-	return ERR_NOT_SUPPORTED;
-}
-
-
-/*########################################################################################################################*
-*-------------------------------------------------------Dynamic lib-------------------------------------------------------*
-*#########################################################################################################################*/
-/* TODO can this actually be supported somehow */
-const cc_string DynamicLib_Ext = String_FromConst(".so");
-
-void* DynamicLib_Load2(const cc_string* path)      { return NULL; }
-void* DynamicLib_Get2(void* lib, const char* name) { return NULL; }
-
-cc_bool DynamicLib_DescribeError(cc_string* dst) {
-	String_AppendConst(dst, "Dynamic linking unsupported");
-	return true;
-}
-
-
-/*########################################################################################################################*
-*--------------------------------------------------------Platform---------------------------------------------------------*
-*#########################################################################################################################*/
 void Platform_Init(void) {
-	Platform_SingleProcess = true;
 	/*pspDebugSioInit();*/ 
 	// TODO: sceNetInit();
 	epoll_id = sceNetEpollCreate("CC poll", 0);
@@ -547,10 +418,7 @@ cc_bool Platform_DescribeError(cc_result res, cc_string* dst) {
 /*########################################################################################################################*
 *-------------------------------------------------------Encryption--------------------------------------------------------*
 *#########################################################################################################################*/
-cc_result Platform_Encrypt(const void* data, int len, cc_string* dst) {
-	return ERR_NOT_SUPPORTED;
-}
-cc_result Platform_Decrypt(const void* data, int len, cc_string* dst) {
+static cc_result GetMachineID(cc_uint32* key) {
 	return ERR_NOT_SUPPORTED;
 }
 #endif

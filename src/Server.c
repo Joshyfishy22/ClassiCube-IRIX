@@ -461,8 +461,9 @@ static void OnNewMap(void) {
 	if (Server.IsSinglePlayer) return;
 
 	/* wipe all existing entities */
-	for (i = 0; i < ENTITIES_MAX_COUNT; i++) {
-		Protocol_RemoveEntity((EntityID)i);
+	for (i = 0; i < ENTITIES_SELF_ID; i++) 
+	{
+		Entities_Remove((EntityID)i);
 	}
 }
 
@@ -479,6 +480,7 @@ static void OnInit(void) {
 
 	ScheduledTask_Add(GAME_NET_TICKS, Server.Tick);
 	String_AppendConst(&Server.AppName, GAME_APP_NAME);
+	String_AppendConst(&Server.AppName, Platform_AppNameSuffix);
 
 #ifdef CC_BUILD_WEB
 	if (!Input_TouchMode) return;

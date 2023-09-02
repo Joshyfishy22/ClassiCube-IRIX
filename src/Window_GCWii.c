@@ -72,7 +72,7 @@ void Window_Init(void) {
 	WindowInfo.Focused = true;
 	WindowInfo.Exists  = true;
 
-	Input.GamepadSource = true;
+	Input.Sources = INPUT_SOURCE_GAMEPAD;
 	#if defined HW_RVL
 	WPAD_Init();
 	WPAD_SetDataFormat(0, WPAD_FMT_BTNS_ACC_IR);
@@ -92,22 +92,11 @@ void Window_Close(void) {
 /*########################################################################################################################*
 *---------------------------------------------GameCube controller processing----------------------------------------------*
 *#########################################################################################################################*/
-static void ProcessPAD_Launcher(PADStatus* pad) {
-	int mods = pad->button;	
-	
-	Input_SetNonRepeatable(CCKEY_ENTER,  mods & PAD_BUTTON_A);
-	Input_SetNonRepeatable(CCKEY_ESCAPE, mods & PAD_BUTTON_B);
-	// fake tab with down for Launcher
-	//Input_SetNonRepeatable(CCKEY_TAB, mods & PAD_BUTTON_DOWN);
-	
-	Input_SetNonRepeatable(CCPAD_LEFT,  mods & PAD_BUTTON_LEFT);
-	Input_SetNonRepeatable(CCPAD_RIGHT, mods & PAD_BUTTON_RIGHT);
-	Input_SetNonRepeatable(CCPAD_UP,    mods & PAD_BUTTON_UP);
-	Input_SetNonRepeatable(CCPAD_DOWN,  mods & PAD_BUTTON_DOWN);
-}
-static void ProcessPAD_LeftJoystick(PADStatus* pad) {
-	int dx = pad->stickX;
-	int dy = pad->stickY;
+static PADStatus gc_pad;
+
+static void ProcessPAD_LeftJoystick(void) {
+	int dx = gc_pad.stickX;
+	int dy = gc_pad.stickY;
 
 	// May not be exactly 0 on actual hardware
 	if (Math_AbsI(dx) <= 8) dx = 0;
@@ -117,25 +106,21 @@ static void ProcessPAD_LeftJoystick(PADStatus* pad) {
 	Input.JoystickMovement = true;
 	Input.JoystickAngle    = Math_Atan2(dx, -dy);
 }
-static void ProcessPAD_RightJoystick(PADStatus* pad) {
-	int dx = pad->substickX;
-	int dy = pad->substickY;
+
+static void ProcessPAD_RightJoystick(double delta) {
+	float scale = (delta * 60.0) / 8.0f;
+	int dx = gc_pad.substickX;
+	int dy = gc_pad.substickY;
 
 	// May not be exactly 0 on actual hardware
 	if (Math_AbsI(dx) <= 8) dx = 0;
 	if (Math_AbsI(dy) <= 8) dy = 0;
 	
-	Event_RaiseRawMove(&PointerEvents.RawMoved, dx / 8.0f, -dy / 8.0f);		
+	Event_RaiseRawMove(&PointerEvents.RawMoved, dx * scale, -dy * scale);		
 }
 
-static void ProcessPAD_Game(PADStatus* pad) {
-	int mods = pad->button;
-
-	if (Input.RawMode) {
-		ProcessPAD_LeftJoystick(pad);
-		ProcessPAD_RightJoystick(pad);
-	}		
-	
+static void ProcessPAD_Buttons(void) {
+	int mods = gc_pad.button;
 	Input_SetNonRepeatable(CCPAD_L, mods & PAD_TRIGGER_L);
 	Input_SetNonRepeatable(CCPAD_R, mods & PAD_TRIGGER_R);
 	
@@ -147,23 +132,92 @@ static void ProcessPAD_Game(PADStatus* pad) {
 	Input_SetNonRepeatable(CCPAD_START,  mods & PAD_BUTTON_START);
 	Input_SetNonRepeatable(CCPAD_SELECT, mods & PAD_TRIGGER_Z);
 	
-	Input_SetNonRepeatable(CCPAD_LEFT,  mods & PAD_BUTTON_LEFT);
-	Input_SetNonRepeatable(CCPAD_RIGHT, mods & PAD_BUTTON_RIGHT);
-	Input_SetNonRepeatable(CCPAD_UP,    mods & PAD_BUTTON_UP);
-	Input_SetNonRepeatable(CCPAD_DOWN,  mods & PAD_BUTTON_DOWN);
+	Input_SetNonRepeatable(CCPAD_LEFT,   mods & PAD_BUTTON_LEFT);
+	Input_SetNonRepeatable(CCPAD_RIGHT,  mods & PAD_BUTTON_RIGHT);
+	Input_SetNonRepeatable(CCPAD_UP,     mods & PAD_BUTTON_UP);
+	Input_SetNonRepeatable(CCPAD_DOWN,   mods & PAD_BUTTON_DOWN);
 }
 
-static void ProcessPADInput(void) {
+static void ProcessPADInput(double delta) {
 	PADStatus pads[4];
 	PAD_Read(pads);
-	if (pads[0].err) return;
-	
-	if (launcherMode) {
-		ProcessPAD_Launcher(&pads[0]);
+	int error = pads[0].err;
+
+	if (error == 0) {
+		gc_pad = pads[0]; // new state arrived
+	} else if (error == PAD_ERR_TRANSFER) {
+		// usually means still busy transferring state - use last state
 	} else {
-		ProcessPAD_Game(&pads[0]);
+		return; // not connected, still busy, etc
+	}
+	
+	ProcessPAD_Buttons();
+	if (Input.RawMode) {
+		ProcessPAD_LeftJoystick();
+		ProcessPAD_RightJoystick(delta);
 	}
 }
+
+
+/*########################################################################################################################*
+*--------------------------------------------------Kebyaord processing----------------------------------------------------*
+*#########################################################################################################################*/
+#if defined HW_RVL
+static const cc_uint8 key_map[] = {
+/* 0x00 */ 0,0,0,0,         'A','B','C','D', 
+/* 0x08 */ 'E','F','G','H', 'I','J','K','L',
+/* 0x10 */ 'M','N','O','P', 'Q','R','S','T',
+/* 0x18 */ 'U','V','W','X', 'Y','Z','1','2',
+/* 0x20 */ '3','4','5','6', '7','8','9','0',
+/* 0x28 */ CCKEY_ENTER,CCKEY_ESCAPE,CCKEY_BACKSPACE,CCKEY_TAB, CCKEY_SPACE,CCKEY_MINUS,CCKEY_EQUALS,CCKEY_LBRACKET,
+/* 0x30 */ CCKEY_RBRACKET,CCKEY_BACKSLASH,0,CCKEY_SEMICOLON, CCKEY_QUOTE,CCKEY_TILDE,CCKEY_COMMA,CCKEY_PERIOD,
+/* 0x38 */ CCKEY_SLASH,CCKEY_CAPSLOCK,CCKEY_F1,CCKEY_F2, CCKEY_F3,CCKEY_F4,CCKEY_F5,CCKEY_F6,
+/* 0x40 */ CCKEY_F7,CCKEY_F8,CCKEY_F9,CCKEY_F10, CCKEY_F11,CCKEY_F12,CCKEY_PRINTSCREEN,CCKEY_SCROLLLOCK,
+/* 0x48 */ CCKEY_PAUSE,CCKEY_INSERT,CCKEY_HOME,CCKEY_PAGEUP, CCKEY_DELETE,CCKEY_END,CCKEY_PAGEDOWN,CCKEY_RIGHT,
+/* 0x50 */ CCKEY_LEFT,CCKEY_DOWN,CCKEY_UP,CCKEY_NUMLOCK, CCKEY_KP_DIVIDE,CCKEY_KP_MULTIPLY,CCKEY_KP_MINUS,CCKEY_KP_PLUS,
+/* 0x58 */ CCKEY_KP_ENTER,CCKEY_KP1,CCKEY_KP2,CCKEY_KP3, CCKEY_KP4,CCKEY_KP5,CCKEY_KP6,CCKEY_KP7,
+/* 0x60 */ CCKEY_KP8,CCKEY_KP9,CCKEY_KP0,CCKEY_KP_DECIMAL, 0,0,0,0,
+/* 0x68 */ 0,0,0,0, 0,0,0,0,
+/* 0x70 */ 0,0,0,0, 0,0,0,0,
+/* 0x78 */ 0,0,0,0, 0,0,0,0,
+/* 0x80 */ 0,0,0,0, 0,0,0,0,
+/* 0x88 */ 0,0,0,0, 0,0,0,0,
+/* 0x90 */ 0,0,0,0, 0,0,0,0,
+/* 0x98 */ 0,0,0,0, 0,0,0,0,
+/* 0xA0 */ 0,0,0,0, 0,0,0,0,
+/* 0xA8 */ 0,0,0,0, 0,0,0,0,
+/* 0xB0 */ 0,0,0,0, 0,0,0,0,
+/* 0xB8 */ 0,0,0,0, 0,0,0,0,
+/* 0xC0 */ 0,0,0,0, 0,0,0,0,
+/* 0xC8 */ 0,0,0,0, 0,0,0,0,
+/* 0xD0 */ 0,0,0,0, 0,0,0,0,
+/* 0xD8 */ 0,0,0,0, 0,0,0,0,
+/* 0xE0 */ CCKEY_LCTRL,CCKEY_LSHIFT,CCKEY_LALT,CCKEY_LWIN, CCKEY_RCTRL,CCKEY_RSHIFT,CCKEY_RALT,CCKEY_RWIN
+};
+
+static int MapNativeKey(unsigned key) {
+	return key < Array_Elems(key_map) ? key_map[key] : 0;
+}
+
+static void ProcessKeyboardInput(void) {
+	keyboard_event ke;
+	int res = KEYBOARD_GetEvent(&ke);
+	int key;
+	
+	if (res && ke.type == KEYBOARD_PRESSED)
+	{
+		key = MapNativeKey(ke.keycode);
+		if (key) Input_SetPressed(key);
+		//Platform_Log2("KEYCODE: %i (%i)", &ke.keycode, &ke.type);
+		if (ke.symbol) Event_RaiseInt(&InputEvents.Press, ke.symbol);
+	}
+	if (res && ke.type == KEYBOARD_RELEASED)
+	{
+		key = MapNativeKey(ke.keycode);
+		if (key) Input_SetReleased(key);
+	}
+}
+#endif
 
 
 /*########################################################################################################################*
@@ -174,17 +228,7 @@ static int dragCurX, dragCurY;
 static int dragStartX, dragStartY;
 static cc_bool dragActive;
 
-static void ProcessWPAD_Launcher(int mods) {
-	Input_SetNonRepeatable(CCKEY_ENTER,  mods & WPAD_BUTTON_A);
-	Input_SetNonRepeatable(CCKEY_ESCAPE, mods & WPAD_BUTTON_B);
-
-	Input_SetNonRepeatable(CCPAD_LEFT,   mods & WPAD_BUTTON_LEFT);
-	Input_SetNonRepeatable(CCPAD_RIGHT,  mods & WPAD_BUTTON_RIGHT);
-	Input_SetNonRepeatable(CCPAD_UP,     mods & WPAD_BUTTON_UP);
-	Input_SetNonRepeatable(CCPAD_DOWN,   mods & WPAD_BUTTON_DOWN);
-}
-
-static void ProcessWPAD_Game(int mods) {
+static void ProcessWPAD_Buttons(int mods) {
 	Input_SetNonRepeatable(CCPAD_L, mods & WPAD_BUTTON_1);
 	Input_SetNonRepeatable(CCPAD_R, mods & WPAD_BUTTON_2);
       
@@ -215,14 +259,14 @@ static void ProcessNunchuck_Game(int mods, double delta) {
 	Input_SetNonRepeatable(CCPAD_START,  mods & WPAD_BUTTON_HOME);
 	Input_SetNonRepeatable(CCPAD_SELECT, mods & WPAD_BUTTON_MINUS);
 
-	Input_SetNonRepeatable(KeyBinds[KEYBIND_FLY], mods & WPAD_BUTTON_LEFT);
+	Input_SetNonRepeatable(KeyBinds_Normal[KEYBIND_FLY], mods & WPAD_BUTTON_LEFT);
 
 	if (mods & WPAD_BUTTON_RIGHT) {
 		Mouse_ScrollWheel(1.0*delta);
 	}
 
-	Input_SetNonRepeatable(KeyBinds[KEYBIND_THIRD_PERSON], mods & WPAD_BUTTON_UP);
-	Input_SetNonRepeatable(KeyBinds[KEYBIND_FLY_DOWN],    mods & WPAD_BUTTON_DOWN);
+	Input_SetNonRepeatable(KeyBinds_Normal[KEYBIND_THIRD_PERSON], mods & WPAD_BUTTON_UP);
+	Input_SetNonRepeatable(KeyBinds_Normal[KEYBIND_FLY_DOWN],    mods & WPAD_BUTTON_DOWN);
 
 	const float ANGLE_DELTA = 50;
 	bool nunchuckUp    = (analog.ang > -ANGLE_DELTA)    && (analog.ang < ANGLE_DELTA)     && (analog.mag > 0.5);
@@ -235,6 +279,7 @@ static void ProcessNunchuck_Game(int mods, double delta) {
 	Input_SetNonRepeatable(CCPAD_UP,    nunchuckUp);
 	Input_SetNonRepeatable(CCPAD_DOWN,  nunchuckDown);
 }
+
 
 static void ProcessClassic_LeftJoystick(struct joystick_t* js) {
 	// TODO: need to account for min/max??
@@ -249,7 +294,8 @@ static void ProcessClassic_LeftJoystick(struct joystick_t* js) {
 	Input.JoystickAngle    = (js->ang - 90) * MATH_DEG2RAD;
 }
 
-static void ProcessClassic_RightJoystick(struct joystick_t* js) {
+static void ProcessClassic_RightJoystick(struct joystick_t* js, double delta) {
+	float scale = (delta * 60.0) / 2.0f;
 	// TODO: need to account for min/max??
 	int dx = js->pos.x - js->center.x;
 	int dy = js->pos.y - js->center.y;
@@ -257,14 +303,10 @@ static void ProcessClassic_RightJoystick(struct joystick_t* js) {
 	if (Math_AbsI(dx) <= 8) dx = 0;
 	if (Math_AbsI(dy) <= 8) dy = 0;
 	
-	Event_RaiseRawMove(&PointerEvents.RawMoved, dx / 8.0f, -dy / 8.0f);
+	Event_RaiseRawMove(&PointerEvents.RawMoved, dx * scale, -dy * scale);
 }
 
-static void ProcessClassic_Game(void) {
-	WPADData* wd = WPAD_Data(0);
-	classic_ctrl_t ctrls = wd->exp.classic;
-	int mods = ctrls.btns | ctrls.btns_held;
-
+static void ProcessClassicButtons(int mods) {
 	Input_SetNonRepeatable(CCPAD_L, mods & CLASSIC_CTRL_BUTTON_FULL_L);
 	Input_SetNonRepeatable(CCPAD_R, mods & CLASSIC_CTRL_BUTTON_FULL_R);
       
@@ -281,11 +323,22 @@ static void ProcessClassic_Game(void) {
 	Input_SetNonRepeatable(CCPAD_UP,     mods & CLASSIC_CTRL_BUTTON_UP);
 	Input_SetNonRepeatable(CCPAD_DOWN,   mods & CLASSIC_CTRL_BUTTON_DOWN);
 	
+	Input_SetNonRepeatable(CCPAD_ZL, mods & CLASSIC_CTRL_BUTTON_ZL);
+	Input_SetNonRepeatable(CCPAD_ZR, mods & CLASSIC_CTRL_BUTTON_ZR);
+}
+
+static void ProcessClassicInput(double delta) {
+	WPADData* wd = WPAD_Data(0);
+	classic_ctrl_t ctrls = wd->exp.classic;
+	int mods = ctrls.btns | ctrls.btns_held;
+
+	ProcessClassicButtons(mods);
 	if (Input.RawMode) {
 		ProcessClassic_LeftJoystick(&ctrls.ljs);
-		ProcessClassic_RightJoystick(&ctrls.rjs);
+		ProcessClassic_RightJoystick(&ctrls.rjs, delta);
 	}
 }
+
 
 static void GetIRPos(int res, int* x, int* y) {
 	if (res == WPAD_ERR_NONE) {
@@ -299,33 +352,21 @@ static void GetIRPos(int res, int* x, int* y) {
 	}
 }
 
-static void ProcessKeyboardInput(void) {
-	keyboard_event ke;
-	int res = KEYBOARD_GetEvent(&ke);
-	
-	if (res && ke.type == KEYBOARD_PRESSED)
-	{
-		//Platform_Log2("KEYCODE: %i (%i)", &ke.keycode, &ke.type);
-		if (ke.symbol) Event_RaiseInt(&InputEvents.Press, ke.symbol);
-	}
-}
-
-void Window_ProcessEvents(double delta) {
-	Input.JoystickMovement = false;
-	
+static void ProcessWPADInput(double delta) {	
 	WPAD_ScanPads();
 	u32 mods = WPAD_ButtonsDown(0) | WPAD_ButtonsHeld(0);
 	u32 type;
 	int res  = WPAD_Probe(0, &type);
+	if (res) return;
 
-	if (launcherMode) {
-		ProcessWPAD_Launcher(mods);
+	if (type == WPAD_EXP_CLASSIC) {
+		ProcessClassicInput(delta);
+	} else if (launcherMode) {
+		ProcessWPAD_Buttons(mods);
 	} else if (type == WPAD_EXP_NUNCHUK) {
 		ProcessNunchuck_Game(mods, delta);
-	} else if (type == WPAD_EXP_CLASSIC) {
-		ProcessClassic_Game();
 	} else {
-		ProcessWPAD_Game(mods);
+		ProcessWPAD_Buttons(mods);
 	}
 
 	int x, y;
@@ -341,8 +382,13 @@ void Window_ProcessEvents(double delta) {
 		dragActive = false;
 	}
 	Pointer_SetPosition(0, x, y);
-	
-	ProcessPADInput();
+}
+
+void Window_ProcessEvents(double delta) {
+	Input.JoystickMovement = false;
+
+	ProcessWPADInput(delta);
+	ProcessPADInput(delta);
 	ProcessKeyboardInput();
 }
 
@@ -373,7 +419,7 @@ void Window_UpdateRawMouse(void)  {
 void Window_ProcessEvents(double delta) {
 	Input.JoystickMovement = false;
 	
-	ProcessPADInput();
+	ProcessPADInput(delta);
 }
 
 void Window_UpdateRawMouse(void) { }

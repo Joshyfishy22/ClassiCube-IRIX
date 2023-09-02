@@ -77,8 +77,8 @@ static int RunProgram(int argc, char** argv) {
 #ifdef _MSC_VER
 	/* NOTE: Make sure to comment this out before pushing a commit */
 	//cc_string rawArgs = String_FromConst("UnknownShadow200 fffff 127.0.0.1 25565");
-	//cc_string rawArgs = String_FromConst("UnknownShadow200"); 
-	//argsCount = String_UNSAFE_Split(&rawArgs, ' ', args, 4);
+	cc_string rawArgs = String_FromConst("UnknownShadow200"); 
+	argsCount = String_UNSAFE_Split(&rawArgs, ' ', args, 4);
 #endif
 
 	if (argsCount == 0) {
@@ -138,7 +138,7 @@ void android_main(void) {
 	SetupProgram(0, NULL);
 	for (;;) { RunProgram(0, NULL); }
 }
-#elif defined CC_BUILD_3DS || defined CC_BUILD_PSP || defined CC_BUILD_GCWII || defined CC_BUILD_DREAMCAST
+#elif defined CC_BUILD_3DS || defined CC_BUILD_PSP || defined CC_BUILD_GCWII || defined CC_BUILD_DREAMCAST || defined CC_BUILD_XBOX || defined CC_BUILD_PSVITA
 int main(int argc, char** argv) {
 	SetupProgram(argc, argv);
 	while (WindowInfo.Exists) { 

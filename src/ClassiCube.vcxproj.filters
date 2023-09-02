@@ -339,6 +339,9 @@
     <ClInclude Include="SSL.h">
       <Filter>Header Files\Network</Filter>
     </ClInclude>
+    <ClInclude Include="_PlatformConsole.h">
+      <Filter>Header Files\Platform</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="String.c">
@@ -649,6 +652,15 @@
     </ClCompile>
     <ClCompile Include="Platform_Xbox.c">
       <Filter>Source Files\Platform</Filter>
+    </ClCompile>
+    <ClCompile Include="Platform_PSVita.c">
+      <Filter>Source Files\Platform</Filter>
+    </ClCompile>
+    <ClCompile Include="Graphics_Xbox.c">
+      <Filter>Source Files\Graphics</Filter>
+    </ClCompile>
+    <ClCompile Include="Graphics_PSVita.c">
+      <Filter>Source Files\Graphics</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

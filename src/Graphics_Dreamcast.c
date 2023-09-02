@@ -6,13 +6,14 @@
 #include "Window.h"
 #include "GL/gl.h"
 #include "GL/glkos.h"
-#include "GL/glext.h"
 #include <malloc.h>
-#define PIXEL_FORMAT GL_RGBA
+#include <kos.h>
+#include <dc/matrix.h>
+#include <dc/pvr.h>
 
-#define TRANSFER_FORMAT GL_UNSIGNED_BYTE
 /* Current format and size of vertices */
 static int gfx_stride, gfx_format = -1;
+static cc_bool renderingDisabled;
 
 
 /*########################################################################################################################*
@@ -45,18 +46,18 @@ void Gfx_SetFaceCulling(cc_bool enabled)   { gl_Toggle(GL_CULL_FACE); }
 void Gfx_SetAlphaBlending(cc_bool enabled) { gl_Toggle(GL_BLEND); }
 void Gfx_SetAlphaArgBlend(cc_bool enabled) { }
 
-static void GL_ClearColor(PackedCol color) {
-	glClearColor(PackedCol_R(color) / 255.0f, PackedCol_G(color) / 255.0f,
-				 PackedCol_B(color) / 255.0f, PackedCol_A(color) / 255.0f);
-}
 void Gfx_ClearCol(PackedCol color) {
 	if (color == gfx_clearColor) return;
-	GL_ClearColor(color);
 	gfx_clearColor = color;
+	
+	float r = PackedCol_R(color) / 255.0f;
+	float g = PackedCol_G(color) / 255.0f;
+	float b = PackedCol_B(color) / 255.0f;
+	pvr_set_bg_color(r, g, b);
 }
 
 void Gfx_SetColWriteMask(cc_bool r, cc_bool g, cc_bool b, cc_bool a) {
-	glColorMask(r, g, b, a);
+	// TODO: Doesn't work
 }
 
 void Gfx_SetDepthWrite(cc_bool enabled) { glDepthMask(enabled); }
@@ -67,9 +68,8 @@ void Gfx_SetTexturing(cc_bool enabled) { }
 void Gfx_SetAlphaTest(cc_bool enabled) { gl_Toggle(GL_ALPHA_TEST); }
 
 void Gfx_DepthOnlyRendering(cc_bool depthOnly) {
-	cc_bool enabled = !depthOnly;
-	Gfx_SetColWriteMask(enabled, enabled, enabled, enabled);
-	gl_Toggle(GL_TEXTURE_2D);
+	// don't need a fake second pass in this case
+	renderingDisabled = depthOnly;
 }
 
 
@@ -123,7 +123,6 @@ void Gfx_GetApiInfo(cc_string* info) {
 	String_Format1(info, "-- Using OpenGL (%i bit) --\n", &pointerSize);
 	String_Format1(info, "Vendor: %c\n",     glGetString(GL_VENDOR));
 	String_Format1(info, "Renderer: %c\n",   glGetString(GL_RENDERER));
-	String_Format1(info, "GL version: %c\n", glGetString(GL_VERSION));
 	String_Format2(info, "Max texture size: (%i, %i)\n", &Gfx.MaxTexWidth, &Gfx.MaxTexHeight);
 }
 
@@ -133,8 +132,8 @@ void Gfx_SetFpsLimit(cc_bool vsync, float minFrameMs) {
 }
 
 void Gfx_BeginFrame(void) { }
-void Gfx_Clear(void) { 
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); 
+void Gfx_Clear(void) {
+	// no need to use glClear
 }
 
 void Gfx_EndFrame(void) {
@@ -152,12 +151,11 @@ void Gfx_OnWindowResize(void) {
 /*########################################################################################################################*
 *-------------------------------------------------------Index buffers-----------------------------------------------------*
 *#########################################################################################################################*/
-static cc_uint16 __attribute__((aligned(16))) gfx_indices[GFX_MAX_INDICES];
 static void* gfx_vertices;
 static int vb_size;
 
 GfxResourceID Gfx_CreateIb2(int count, Gfx_FillIBFunc fillFunc, void* obj) {
-	fillFunc(gfx_indices, count, obj);
+	return 1;
 }
 
 void Gfx_BindIb(GfxResourceID ib) { }
@@ -188,7 +186,7 @@ void* Gfx_LockVb(GfxResourceID vb, VertexFormat fmt, int count) {
 }
 
 void Gfx_UnlockVb(GfxResourceID vb) { 
-	gfx_vertices = vb; 
+	gfx_vertices = vb;
 	//sceKernelDcacheWritebackInvalidateRange(vb, vb_size);
 }
 
@@ -221,74 +219,172 @@ void Gfx_SetDynamicVbData(GfxResourceID vb, void* vertices, int vCount) {
 *---------------------------------------------------------Textures--------------------------------------------------------*
 *#########################################################################################################################*/
 void Gfx_BindTexture(GfxResourceID texId) {
-	int tex = texId;
-	glBindTexture(GL_TEXTURE_2D, (GLuint)texId);
+	gldcBindTexture((GLuint)texId);
+}
+
+void Gfx_DeleteTexture(GfxResourceID* texId) {
+	GLuint id = (GLuint)(*texId);
+	if (!id) return;
+	gldcDeleteTexture(id);
+	*texId = 0;
+}
+
+void Gfx_EnableMipmaps(void)  { }
+void Gfx_DisableMipmaps(void) { }
+
+
+static unsigned Interleave(unsigned x) {
+	// Simplified "Interleave bits by Binary Magic Numbers" from
+	// http://graphics.stanford.edu/~seander/bithacks.html#InterleaveBMN
+
+	x = (x | (x << 8)) & 0x00FF00FF;
+	x = (x | (x << 4)) & 0x0F0F0F0F;
+	x = (x | (x << 2)) & 0x33333333;
+	x = (x | (x << 1)) & 0x55555555;
+	return x;
+}
+
+/*static int CalcTwiddledIndex(int x, int y, int w, int h) {
+	// Twiddled index looks like this (starting from lowest numbered bits):
+	//   e.g. w > h: yx_yx_xx_xx
+	//   e.g. h > w: yx_yx_yy_yy
+	// And can therefore be broken down into two components:
+	//  1) interleaved lower bits
+	//  2) masked and then shifted higher bits
+	
+	int min_dimension    = Math.Min(w, h);
+	
+	int interleave_mask  = min_dimension - 1;
+	int interleaved_bits = Math_Log2(min_dimension);
+	
+	int shifted_mask = (~0) & ~interleave_mask;
+	// as lower interleaved bits contain both X and Y, need to adjust the
+	//  higher bit shift by number of interleaved bits used by other axis
+	int shift_bits   = interleaved_bits;
+	
+	// For example, in the case of W=4 and H=8
+	//  the bit pattern is yx_yx_yx_Y
+	//  - lower 3 Y bits are interleaved
+	//  - upper 1 Y bit must be shifted right 3 bits
+	
+	int lo_Y = Interleave(y & interleave_mask);
+	int hi_Y = (y & shifted_mask) << shift_bits;
+	int Y    = lo_Y | hi_Y;
+	
+	int lo_X  = Interleave(x & interleave_mask) << 1;
+	int hi_X  = (x & shifted_mask) << shift_bits;
+	int X     = lo_X | hi_X;
+
+	return X | Y;
+}*/
+
+#define Twiddle_CalcFactors(w, h) \
+	min_dimension    = min(w, h); \
+	interleave_mask  = min_dimension - 1; \
+	interleaved_bits = Math_Log2(min_dimension); \
+	shifted_mask     = 0xFFFFFFFFU & ~interleave_mask; \
+	shift_bits       = interleaved_bits;
+	
+#define Twiddle_CalcY(y) \
+	lo_Y = Interleave(y & interleave_mask); \
+	hi_Y = (y & shifted_mask) << shift_bits; \
+	Y    = lo_Y | hi_Y;
+	
+#define Twiddle_CalcX(x) \
+	lo_X  = Interleave(x & interleave_mask) << 1; \
+	hi_X  = (x & shifted_mask) << shift_bits; \
+	X     = lo_X | hi_X;
+	
+	
+// B8 G8 R8 A8 > B4 G4 R4 A4
+#define BGRA8_to_BGRA4(src) \
+	((src[0] & 0xF0) >> 4) | (src[1] & 0xF0) | ((src[2] & 0xF0) << 4) | ((src[3] & 0xF0) << 8);	
+
+static void ConvertTexture(cc_uint16* dst, struct Bitmap* bmp) {
+	unsigned min_dimension;
+	unsigned interleave_mask, interleaved_bits;
+	unsigned shifted_mask, shift_bits;
+	unsigned lo_Y, hi_Y, Y;
+	unsigned lo_X, hi_X, X;	
+	Twiddle_CalcFactors(bmp->width, bmp->height);
+	
+	cc_uint8* src = (cc_uint8*)bmp->scan0;	
+	for (int y = 0; y < bmp->height; y++)
+	{
+		Twiddle_CalcY(y);
+		for (int x = 0; x < bmp->width; x++, src += 4)
+		{
+			Twiddle_CalcX(x);
+			dst[X | Y] = BGRA8_to_BGRA4(src);
+		}
+	}
 }
 
 GfxResourceID Gfx_CreateTexture(struct Bitmap* bmp, cc_uint8 flags, cc_bool mipmaps) {
-	GLuint texId;
-	glGenTextures(1, &texId);
-	glBindTexture(GL_TEXTURE_2D, texId);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
+	GLuint texId = gldcGenTexture();
+	gldcBindTexture(texId);
 	if (!Math_IsPowOf2(bmp->width) || !Math_IsPowOf2(bmp->height)) {
 		Logger_Abort("Textures must have power of two dimensions");
 	}
-
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, bmp->width, bmp->height, 0, PIXEL_FORMAT, GL_UNSIGNED_BYTE, bmp->scan0);
-
+	
+	gldcAllocTexture(bmp->width, bmp->height, GL_RGBA,
+				GL_UNSIGNED_SHORT_4_4_4_4_REV_TWID_KOS);
+				
+	void* pixels;
+	GLsizei width, height;
+	gldcGetTexture(&pixels, &width, &height);
+	ConvertTexture(pixels, bmp);
 	return texId;
 }
-
-#define UPDATE_FAST_SIZE (64 * 64)
-static CC_NOINLINE void UpdateTextureSlow(int x, int y, struct Bitmap* part, int rowWidth) {
-	BitmapCol buffer[UPDATE_FAST_SIZE];
-	void* ptr = (void*)buffer;
-	int count = part->width * part->height;
-
-	/* cannot allocate memory on the stack for very big updates */
-	if (count > UPDATE_FAST_SIZE) {
-		ptr = Mem_Alloc(count, 4, "Gfx_UpdateTexture temp");
+// TODO: struct GPUTexture ??
+static void ConvertSubTexture(cc_uint16* dst, int texWidth, int texHeight,
+				int originX, int originY, 
+				struct Bitmap* bmp, int rowWidth) {
+	unsigned min_dimension;
+	unsigned interleave_mask, interleaved_bits;
+	unsigned shifted_mask, shift_bits;
+	unsigned lo_Y, hi_Y, Y;
+	unsigned lo_X, hi_X, X;
+	Twiddle_CalcFactors(texWidth, texHeight);
+	
+	for (int y = 0; y < bmp->height; y++)
+	{
+		int dstY = y + originY;
+		Twiddle_CalcY(dstY);
+		cc_uint8* src = (cc_uint8*)(bmp->scan0 + rowWidth * y);
+		
+		for (int x = 0; x < bmp->width; x++, src += 4)
+		{
+			int dstX = x + originX;
+			Twiddle_CalcX(dstX);
+			dst[X | Y] = BGRA8_to_BGRA4(src);
+		}
 	}
-
-	CopyTextureData(ptr, part->width << 2, part, rowWidth << 2);
-	glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, part->width, part->height, PIXEL_FORMAT, GL_UNSIGNED_BYTE, ptr);
-	if (count > UPDATE_FAST_SIZE) Mem_Free(ptr);
 }
 
 void Gfx_UpdateTexture(GfxResourceID texId, int x, int y, struct Bitmap* part, int rowWidth, cc_bool mipmaps) {
-	glBindTexture(GL_TEXTURE_2D, (GLuint)texId);
-	/* TODO: Use GL_UNPACK_ROW_LENGTH for Desktop OpenGL */
-
-	if (part->width == rowWidth) {
-		glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, part->width, part->height, PIXEL_FORMAT, GL_UNSIGNED_BYTE, part->scan0);
-	} else {
-		UpdateTextureSlow(x, y, part, rowWidth);
-	}
+	gldcBindTexture(texId);
+				
+	void* pixels;
+	GLsizei width, height;
+	gldcGetTexture(&pixels, &width, &height);
+	
+	ConvertSubTexture(pixels, width, height,
+				x, y, part, rowWidth);
+	// TODO: Do we need to flush VRAM?
 }
 
 void Gfx_UpdateTexturePart(GfxResourceID texId, int x, int y, struct Bitmap* part, cc_bool mipmaps) {
 	Gfx_UpdateTexture(texId, x, y, part, part->width, mipmaps);
 }
 
-void Gfx_DeleteTexture(GfxResourceID* texId) {
-	GLuint id = (GLuint)(*texId);
-	if (!id) return;
-	glDeleteTextures(1, &id);
-	*texId = 0;
-}
-
-void Gfx_EnableMipmaps(void) { }
-void Gfx_DisableMipmaps(void) { }
-
 
 /*########################################################################################################################*
 *-----------------------------------------------------State management----------------------------------------------------*
 *#########################################################################################################################*/
 static PackedCol gfx_fogColor;
-static float gfx_fogEnd = -1.0f, gfx_fogDensity = -1.0f;
-static int gfx_fogMode  = -1;
+static float gfx_fogEnd = 16.0f, gfx_fogDensity = 1.0f;
+static FogFunc gfx_fogMode = -1;
 
 void Gfx_SetFog(cc_bool enabled) {
 	gfx_fogEnabled = enabled;
@@ -296,62 +392,93 @@ void Gfx_SetFog(cc_bool enabled) {
 }
 
 void Gfx_SetFogCol(PackedCol color) {
-	float rgba[4];
 	if (color == gfx_fogColor) return;
-
-	rgba[0] = PackedCol_R(color) / 255.0f; 
-	rgba[1] = PackedCol_G(color) / 255.0f;
-	rgba[2] = PackedCol_B(color) / 255.0f; 
-	rgba[3] = PackedCol_A(color) / 255.0f;
-
-	glFogfv(GL_FOG_COLOR, rgba);
 	gfx_fogColor = color;
+
+	float r = PackedCol_R(color) / 255.0f; 
+	float g = PackedCol_G(color) / 255.0f;
+	float b = PackedCol_B(color) / 255.0f; 
+	float a = PackedCol_A(color) / 255.0f;
+
+	pvr_fog_table_color(a, r, g, b);
+}
+
+static void UpdateFog(void) {
+	if (gfx_fogMode == FOG_LINEAR) {
+		pvr_fog_table_linear(0.0f, gfx_fogEnd);
+	} else if (gfx_fogMode == FOG_EXP) {
+    		pvr_fog_table_exp(gfx_fogDensity);
+	} else if (gfx_fogMode == FOG_EXP2) {
+		pvr_fog_table_exp2(gfx_fogDensity);
+	}
 }
 
 void Gfx_SetFogDensity(float value) {
 	if (value == gfx_fogDensity) return;
-	glFogf(GL_FOG_DENSITY, value);
 	gfx_fogDensity = value;
+	UpdateFog();
 }
 
 void Gfx_SetFogEnd(float value) {
 	if (value == gfx_fogEnd) return;
-	glFogf(GL_FOG_END, value);
 	gfx_fogEnd = value;
+	UpdateFog();
 }
 
 void Gfx_SetFogMode(FogFunc func) {
-	static GLint modes[3] = { GL_LINEAR, GL_EXP, GL_EXP2 };
 	if (func == gfx_fogMode) return;
-
-	glFogi(GL_FOG_MODE, modes[func]);
 	gfx_fogMode = func;
+	UpdateFog();
 }
 
 
 /*########################################################################################################################*
 *---------------------------------------------------------Matrices--------------------------------------------------------*
 *#########################################################################################################################*/
-static GLenum matrix_modes[] = { GL_PROJECTION, GL_MODELVIEW, GL_TEXTURE };
-static int lastMatrix;
+static matrix_t __attribute__((aligned(32))) _proj, _view;
+static float textureOffsetX, textureOffsetY;
+static int textureOffset;
 
 void Gfx_LoadMatrix(MatrixType type, const struct Matrix* matrix) {
-	if (type != lastMatrix) { lastMatrix = type; glMatrixMode(matrix_modes[type]); }
-	glLoadMatrixf((const float*)matrix);
+	if (type == MATRIX_PROJECTION) memcpy(&_proj, matrix, sizeof(struct Matrix));
+	if (type == MATRIX_VIEW)       memcpy(&_view, matrix, sizeof(struct Matrix));
+	
+	mat_load( &_proj);
+	mat_apply(&_view);
 }
 
 void Gfx_LoadIdentityMatrix(MatrixType type) {
-	if (type != lastMatrix) { lastMatrix = type; glMatrixMode(matrix_modes[type]); }
-	glLoadIdentity();
+	Gfx_LoadMatrix(type, &Matrix_Identity);
 }
 
-static struct Matrix texMatrix = Matrix_IdentityValue;
+
 void Gfx_EnableTextureOffset(float x, float y) {
-	texMatrix.row4.X = x; texMatrix.row4.Y = y;
-	Gfx_LoadMatrix(2, &texMatrix);
+	textureOffset  = true;
+	textureOffsetX = x;
+	textureOffsetY = y;
 }
 
-void Gfx_DisableTextureOffset(void) { Gfx_LoadIdentityMatrix(2); }
+void Gfx_DisableTextureOffset(void) {
+	textureOffset  = false;
+}
+
+static CC_NOINLINE void ShiftTextureCoords(int count) {
+	for (int i = 0; i < count; i++) 
+	{
+		struct VertexTextured* v = (struct VertexTextured*)gfx_vertices + i;
+		v->U += textureOffsetX;
+		v->V += textureOffsetY;
+	}
+}
+
+static CC_NOINLINE void UnshiftTextureCoords(int count) {
+	for (int i = 0; i < count; i++) 
+	{
+		struct VertexTextured* v = (struct VertexTextured*)gfx_vertices + i;
+		v->U -= textureOffsetX;
+		v->V -= textureOffsetY;
+	}
+}
 
 
 /*########################################################################################################################*
@@ -364,7 +491,6 @@ static void Gfx_RestoreState(void) {
 	glEnableClientState(GL_COLOR_ARRAY);
 	gfx_format = -1;
 
-	glHint(GL_FOG_HINT, GL_NICEST);
 	glAlphaFunc(GL_GREATER, 0.5f);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	glDepthFunc(GL_LEQUAL);
@@ -383,13 +509,10 @@ cc_bool Gfx_WarnIfNecessary(void) {
 static void SetupVertices(int startVertex) {
 	if (gfx_format == VERTEX_FORMAT_TEXTURED) {
 		cc_uint32 offset = startVertex * SIZEOF_VERTEX_TEXTURED;
-		glVertexPointer(3,  GL_FLOAT,         SIZEOF_VERTEX_TEXTURED, (void*)(VB_PTR + offset));
-		glColorPointer(4, GL_UNSIGNED_BYTE,   SIZEOF_VERTEX_TEXTURED, (void*)(VB_PTR + offset + 12));
-		glTexCoordPointer(2, GL_FLOAT,        SIZEOF_VERTEX_TEXTURED, (void*)(VB_PTR + offset + 16));
+		glVertexPointer(3, GL_FLOAT, SIZEOF_VERTEX_TEXTURED, (void*)(VB_PTR + offset));
 	} else {
 		cc_uint32 offset = startVertex * SIZEOF_VERTEX_COLOURED;
-		glVertexPointer(3, GL_FLOAT,          SIZEOF_VERTEX_COLOURED, (void*)(VB_PTR + offset));
-		glColorPointer(4, GL_UNSIGNED_BYTE,   SIZEOF_VERTEX_COLOURED, (void*)(VB_PTR + offset + 12));
+		glVertexPointer(3, GL_FLOAT, SIZEOF_VERTEX_COLOURED, (void*)(VB_PTR + offset));
 	}
 }
 
@@ -409,24 +532,27 @@ void Gfx_SetVertexFormat(VertexFormat fmt) {
 
 void Gfx_DrawVb_Lines(int verticesCount) {
 	SetupVertices(0);
-	glDrawArrays(GL_LINES, 0, verticesCount);
+	//glDrawArrays(GL_LINES, 0, verticesCount);
 }
 
 void Gfx_DrawVb_IndexedTris_Range(int verticesCount, int startVertex) {
 	SetupVertices(startVertex);
-	glDrawElements(GL_TRIANGLES, ICOUNT(verticesCount), GL_UNSIGNED_SHORT, gfx_indices);
+	glDrawArrays(GL_QUADS, 0, verticesCount);
 }
 
 void Gfx_DrawVb_IndexedTris(int verticesCount) {
 	SetupVertices(0);
-	glDrawElements(GL_TRIANGLES, ICOUNT(verticesCount), GL_UNSIGNED_SHORT, gfx_indices);
+	
+	if (textureOffset) ShiftTextureCoords(verticesCount);
+	glDrawArrays(GL_QUADS, 0, verticesCount);
+	if (textureOffset) UnshiftTextureCoords(verticesCount);
 }
 
 void Gfx_DrawIndexedTris_T2fC4b(int verticesCount, int startVertex) {
+	if (renderingDisabled) return;
+	
 	cc_uint32 offset = startVertex * SIZEOF_VERTEX_TEXTURED;
-	glVertexPointer(3, GL_FLOAT,        SIZEOF_VERTEX_TEXTURED, (void*)(VB_PTR + offset));
-	glColorPointer(4, GL_UNSIGNED_BYTE, SIZEOF_VERTEX_TEXTURED, (void*)(VB_PTR + offset + 12));
-	glTexCoordPointer(2, GL_FLOAT,      SIZEOF_VERTEX_TEXTURED, (void*)(VB_PTR + offset + 16));
-	glDrawElements(GL_TRIANGLES,        ICOUNT(verticesCount),   GL_UNSIGNED_SHORT, gfx_indices);
+	glVertexPointer(3, GL_FLOAT, SIZEOF_VERTEX_TEXTURED, (void*)(VB_PTR + offset));
+	glDrawArrays(GL_QUADS, 0, verticesCount);
 }
 #endif

@@ -156,9 +156,11 @@ static int Http_Add(const cc_string* url, cc_uint8 flags, cc_uint8 type, const c
 	return req.id;
 }
 
-static const cc_string urlRewrites[4] = {
+static const cc_string urlRewrites[] = {
 	String_FromConst("http://dl.dropbox.com/"),  String_FromConst("https://dl.dropboxusercontent.com/"),
-	String_FromConst("https://dl.dropbox.com/"), String_FromConst("https://dl.dropboxusercontent.com/")
+	String_FromConst("https://dl.dropbox.com/"), String_FromConst("https://dl.dropboxusercontent.com/"),
+	String_FromConst("https://www.imgur.com/"),  String_FromConst("https://i.imgur.com/"),
+	String_FromConst("https://imgur.com/"),      String_FromConst("https://i.imgur.com/"),
 };
 /* Converts say dl.dropbox.com/xyZ into dl.dropboxusercontent.com/xyz */
 static void Http_GetUrl(struct HttpRequest* req, cc_string* dst) {

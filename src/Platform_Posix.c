@@ -42,6 +42,15 @@ const cc_result ReturnCode_DirectoryExists  = EEXIST;
 #endif
 #define Socket__Error() errno
 
+#if defined CC_BUILD_ANDROID
+const char* Platform_AppNameSuffix = " android alpha";
+#elif defined CC_BUILD_IOS
+const char* Platform_AppNameSuffix = " iOS alpha";
+#else
+const char* Platform_AppNameSuffix = "";
+#endif
+cc_bool Platform_SingleProcess;
+
 /* Operating system specific include files */
 #if defined CC_BUILD_DARWIN
 #include <mach/mach_time.h>
@@ -856,12 +865,12 @@ static cc_result Process_RawGetExePath(char* path, int* len) {
 /*########################################################################################################################*
 *--------------------------------------------------------Updater----------------------------------------------------------*
 *#########################################################################################################################*/
+cc_bool Updater_Supported = true;
 #if defined CC_BUILD_ANDROID
 /* implemented in Platform_Android.c */
 #elif defined CC_BUILD_IOS
 /* implemented in interop_ios.m */
 #else
-const char* const Updater_D3D9 = NULL;
 cc_bool Updater_Clean(void) { return true; }
 
 #if defined CC_BUILD_RPI
@@ -873,19 +882,27 @@ cc_bool Updater_Clean(void) { return true; }
 #elif defined CC_BUILD_LINUX
 	#if __x86_64__
 	const struct UpdaterInfo Updater_Info = {
+		#ifndef CC_BUILD_GLMODERN
+		"", 1, { { "OpenGL", "ClassiCube" } }
+		#else	
 		"&eModernGL is recommended for newer machines (2010 or later)", 2,
 		{
 			{ "ModernGL", "cc-nix64-gl2" },
 			{ "OpenGL",   "ClassiCube" }
 		}
+		#endif
 	};
 	#elif __i386__
 	const struct UpdaterInfo Updater_Info = {
+		#ifndef CC_BUILD_GLMODERN
+		"", 1, { { "OpenGL", "ClassiCube.32" } }
+		#else
 		"&eModernGL is recommended for newer machines (2010 or later)", 2,
 		{
 			{ "ModernGL", "cc-nix32-gl2" },
 			{ "OpenGL",   "ClassiCube.32" }
 		}
+		#endif
 	};
 	#else
 	const struct UpdaterInfo Updater_Info = { "&eCompile latest source code to update", 0 };
@@ -893,19 +910,27 @@ cc_bool Updater_Clean(void) { return true; }
 #elif defined CC_BUILD_MACOS
 	#if __x86_64__
 	const struct UpdaterInfo Updater_Info = {
+		#ifndef CC_BUILD_GLMODERN
+		"", 1, { { "OpenGL", "ClassiCube.64.osx" } }
+		#else
 		"&eModernGL is recommended for newer machines (2010 or later)", 2,
 		{
 			{ "ModernGL", "cc-osx64-gl2" },
 			{ "OpenGL",   "ClassiCube.64.osx" }
 		}
+		#endif
 	};
 	#elif __i386__
 	const struct UpdaterInfo Updater_Info = {
+		#ifndef CC_BUILD_GLMODERN
+		"", 1, { { "OpenGL", "ClassiCube.osx" } }
+		#else
 		"&eModernGL is recommended for newer machines (2010 or later)", 2,
 		{
 			{ "ModernGL", "cc-osx32-gl2" },
 			{ "OpenGL",   "ClassiCube.osx" }
 		}
+		#endif
 	};
 	#else
 	const struct UpdaterInfo Updater_Info = { "&eCompile latest source code to update", 0 };

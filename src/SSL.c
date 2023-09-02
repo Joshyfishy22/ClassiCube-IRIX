@@ -420,13 +420,22 @@ cc_result SSL_Free(void* ctx_) {
 #elif defined CC_BUILD_3DS
 #include <3ds.h>
 #include "String.h"
+#define CERT_ATTRIBUTES
+#include "../misc/RootCerts.h"
+
 // https://github.com/devkitPro/3ds-examples/blob/master/network/sslc/source/ssl.c
 // https://github.com/devkitPro/libctru/blob/master/libctru/include/3ds/services/sslc.h
 static u32 certChainHandle;
 static cc_bool _verifyCerts;
+
 static void SSL_CreateRootChain(void) {
-	int ret = sslcCreateRootCertChain(&certChainHandle);
+	int ret;
+
+	ret = sslcCreateRootCertChain(&certChainHandle);
 	if (ret) { Platform_Log1("sslcCreateRootCertChain failed: %i", &ret); return; }
+		
+	ret = sslcAddTrustedRootCA(certChainHandle, Baltimore_RootCert, Baltimore_RootCert_Size, NULL);
+	if (ret) { Platform_Log1("sslcAddTrustedRootCA failed: %i", &ret); return; }
 }
 
 void SSLBackend_Init(cc_bool verifyCerts) {
@@ -452,26 +461,33 @@ cc_result SSL_Init(cc_socket socket, const cc_string* host_, void** out_ctx) {
 	
 	int opts = _verifyCerts ? SSLCOPT_Default : SSLCOPT_DisableVerify;
 	if ((ret = sslcCreateContext(ctx, socket, opts, host))) return ret;
+	Platform_LogConst("--ssl context create--");
 	sslcContextSetRootCertChain(ctx, certChainHandle);
+	Platform_LogConst("--ssl root chain added--");
 	
 	// detect lack of proper SSL support in Citra
 	if (!ctx->sslchandle) return HTTP_ERR_NO_SSL;
 	if ((ret = sslcStartConnection(ctx, NULL, NULL))) return ret;
+	Platform_LogConst("--ssl connection started--");
 	return 0;
 }
 
 cc_result SSL_Read(void* ctx_, cc_uint8* data, cc_uint32 count, cc_uint32* read) { 
+	Platform_Log1("<< IN: %i", &count); 
 	sslcContext* ctx = (sslcContext*)ctx_;
 	int ret = sslcRead(ctx, data, count, false);
 	
+	Platform_Log1("--ssl read-- = %i", &ret);
 	if (ret < 0) return ret;
 	*read = ret; return 0;
 }
 
-cc_result SSL_Write(void* ctx_, const cc_uint8* data, cc_uint32 count, cc_uint32* wrote) { 
+cc_result SSL_Write(void* ctx_, const cc_uint8* data, cc_uint32 count, cc_uint32* wrote) {
+	Platform_Log1(">> OUT: %i", &count); 
 	sslcContext* ctx = (sslcContext*)ctx_;
 	int ret = sslcWrite(ctx, data, count);
 	
+	Platform_Log1("--ssl write-- = %i", &ret);
 	if (ret < 0) return ret;
 	*wrote = ret; return 0;
 }
@@ -487,6 +503,7 @@ cc_result SSL_Free(void* ctx_) {
 #include "Platform.h"
 #include "Logger.h"
 #include "String.h"
+
 #define IOCTLV_SSL_NEW 1
 #define IOCTLV_SSL_CONNECT 2
 #define IOCTLV_SSL_HANDSHAKE 3
@@ -494,6 +511,10 @@ cc_result SSL_Free(void* ctx_) {
 #define IOCTLV_SSL_WRITE 5
 #define IOCTLV_SSL_SHUTDOWN 6
 #define SSL_HEAP_SIZE 0xB000
+
+#define CERT_ATTRIBUTES ATTRIBUTE_ALIGN(32)
+//#include "../misc/RootCerts.h"
+
 static char SSL_fs[] ATTRIBUTE_ALIGN(32) = "/dev/net/ssl";
 static s32 SSL_fd  = -1;
 static s32 SSL_hid = -1;
@@ -504,58 +525,81 @@ void SSLBackend_Init(cc_bool verifyCerts) {
 	if (SSL_hid < 0) Logger_Abort("Failed to create SSL heap");
 }
 cc_bool SSLBackend_DescribeError(cc_result res, cc_string* dst) { return false; }
+
 static u32 ssl_open(void) {
 	s32 ret;
 	if (SSL_fd >= 0) return 0;
 	if (SSL_hid < 0) return ERR_OUT_OF_MEMORY;
+	
 	ret = IOS_Open(SSL_fs, 0);
 	if (ret < 0) return ret;
 	SSL_fd = ret;
 	return 0;
 }
+
 static u32 ssl_close(void) {
 	s32 ret;
 	if (SSL_fd < 0) return 0;
+	
 	ret = IOS_Close(SSL_fd);
 	SSL_fd = -1;
 	return ret;
 }
 
 static s32 ssl_new(const cc_string* host, u32 ssl_verify_options) {
+	static cc_string ccnet_cert_CN = String_FromConst("sni.cloudflaressl.com");
 	s32 ret;
 	
 	u8 aCN[1024] ATTRIBUTE_ALIGN(32);
 	s32 aContext[8] ATTRIBUTE_ALIGN(32);
 	u32 aVerify_options[8] ATTRIBUTE_ALIGN(32);
-	String_EncodeUtf8(aCN, host);
+	
+	// classicube.net's SSL certificate CN is actually "sni.cloudflaressl.com"
+	if (String_CaselessEqualsConst(host, "www.classicube.net")) {
+		String_EncodeUtf8(aCN, &ccnet_cert_CN);
+	} else {
+		String_EncodeUtf8(aCN, host);
+	}
+	
 	if ((ret = ssl_open())) return ret;
+	
 	aVerify_options[0] = ssl_verify_options;
 	ret = IOS_IoctlvFormat(SSL_hid, SSL_fd, IOCTLV_SSL_NEW, "d:dd", aContext, 0x20, aVerify_options, 0x20, aCN, 0x100);
 	ssl_close();
+	
 	return ret ? ret : aContext[0];
 }
+
 static s32 ssl_connect(s32 ssl_context, s32 socket) {
 	s32 ret;
 	s32 aSsl_context[8] ATTRIBUTE_ALIGN(32);
 	s32 aSocket[8] ATTRIBUTE_ALIGN(32);
 	s32 aResponse[8] ATTRIBUTE_ALIGN(32);
+	
 	if ((ret = ssl_open())) return ret;
+	
 	aSsl_context[0] = ssl_context;
 	aSocket[0]      = socket;
-	ret = IOS_IoctlvFormat(SSL_hid, SSL_fd, IOCTLV_SSL_CONNECT, "d:dd", aResponse, 0x20, aSsl_context, 0x20, aSocket, 0x20);
+	ret = IOS_IoctlvFormat(SSL_hid, SSL_fd, IOCTLV_SSL_CONNECT, "d:dd", aResponse, 0x20, aSsl_context, 0x20, aSocket, 0x20);	
 	ssl_close();
+	
 	return ret ? ret : aResponse[0];
 }
+
 static s32 ssl_handshake(s32 ssl_context) {
 	s32 ret;
 	s32 aSsl_context[8] ATTRIBUTE_ALIGN(32);
 	s32 aResponse[8] ATTRIBUTE_ALIGN(32);
+	
 	if ((ret = ssl_open())) return ret;
+	
 	aSsl_context[0] = ssl_context;
-	ret = IOS_IoctlvFormat(SSL_hid, SSL_fd, IOCTLV_SSL_HANDSHAKE, "d:d", aResponse, 0x20, aSsl_context, 0x20);
+	ret = IOS_IoctlvFormat(SSL_hid, SSL_fd, IOCTLV_SSL_HANDSHAKE, "d:d", aResponse, 0x20, aSsl_context, 0x20);	
 	ssl_close();
+	
 	return ret ? ret : aResponse[0];
 }
+
 cc_result SSL_Init(cc_socket socket, const cc_string* host, void** ctx) {
 	int sslCtx, ret;
 	
@@ -579,12 +623,14 @@ cc_result SSL_Read(void* ctx, cc_uint8* data, cc_uint32 count, cc_uint32* read) 
 	s32 aSsl_context[8] ATTRIBUTE_ALIGN(32);
 	s32 aResponse[8] ATTRIBUTE_ALIGN(32);
 	if ((ret = ssl_open())) return ret;
+	
 	u8* aBuffer = NULL;
 	aBuffer = iosAlloc(SSL_hid, count);
 	if (!aBuffer) return IPC_ENOMEM;
 	aSsl_context[0] = sslCtx;
 	ret = IOS_IoctlvFormat(SSL_hid, SSL_fd, IOCTLV_SSL_READ, "dd:d", aResponse, 0x20, aBuffer, count, aSsl_context, 0x20);
 	ssl_close();
+	
 	if (ret == IPC_OK) {
 		Mem_Copy(data, aBuffer, aResponse[0]);
 	}
@@ -592,6 +638,7 @@ cc_result SSL_Read(void* ctx, cc_uint8* data, cc_uint32 count, cc_uint32* read) 
 	iosFree(SSL_hid, aBuffer);
 	return ret;
 }
+
 cc_result SSL_Write(void* ctx, const cc_uint8* data, cc_uint32 count, cc_uint32* wrote) {
 	int sslCtx = *(int*)ctx;
 	*wrote = 0;
@@ -600,6 +647,7 @@ cc_result SSL_Write(void* ctx, const cc_uint8* data, cc_uint32 count, cc_uint32*
 	s32 aSsl_context[8] ATTRIBUTE_ALIGN(32);
 	s32 aResponse[8] ATTRIBUTE_ALIGN(32);
 	if ((ret = ssl_open())) return ret;
+	
 	u8* aBuffer = NULL;
 	aBuffer = iosAlloc(SSL_hid, count);
 	if (!aBuffer) return IPC_ENOMEM;
@@ -612,15 +660,19 @@ cc_result SSL_Write(void* ctx, const cc_uint8* data, cc_uint32 count, cc_uint32*
 	iosFree(SSL_hid, aBuffer);
 	return ret;
 }
+
 cc_result SSL_Free(void* ctx) {
 	int sslCtx = *(int*)ctx;
-	s32 ret;	
+	s32 ret;
+	
 	s32 aSsl_context[8] ATTRIBUTE_ALIGN(32);
 	s32 aResponse[8] ATTRIBUTE_ALIGN(32);	
 	if ((ret = ssl_open())) return ret;
+	
 	aSsl_context[0] = sslCtx;
 	ret = IOS_IoctlvFormat(SSL_hid, SSL_fd, IOCTLV_SSL_SHUTDOWN, "d:d", aResponse, 0x20, aSsl_context, 0x20);
 	ssl_close();
+	
 	return ret;
 }
 #else

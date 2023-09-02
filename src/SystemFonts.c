@@ -760,11 +760,15 @@ void SysFonts_Register(const cc_string* path) { }
 const cc_string* SysFonts_UNSAFE_GetDefault(void) { return &String_Empty; }
 
 void SysFonts_GetNames(struct StringsBuffer* buffer) { }
+
 static union {
 	sys_fontheader hdr;
 	u8 data[SYS_FONTSIZE_ANSI];
 } __attribute__((aligned(32))) ipl_font;
+// must be 32 byte aligned for correct font reading
+
 static cc_bool font_checked, font_okay;
+
 static void LoadIPLFont(void) {
 	font_checked = true;
 	// SJIS font layout not supported
@@ -775,12 +779,12 @@ static void LoadIPLFont(void) {
 }
 
 cc_result SysFont_Make(struct FontDesc* desc, const cc_string* fontName, int size, int flags) {
+	if (!font_checked) LoadIPLFont();
+
 	desc->size   = size;
 	desc->flags  = flags;
-	desc->height = Drawer2D_AdjHeight(size);
-
-	desc->handle = (void*)1;
-	if (!font_checked) LoadIPLFont();
+	desc->height = ipl_font.hdr.cell_height;
+	desc->handle = (void*)1;	
 	
 	if (!font_okay) Font_MakeBitmapped(desc, size, flags);
 	return 0;
@@ -1041,7 +1045,7 @@ void SysFonts_GetNames(struct StringsBuffer* buffer) { }
 cc_result SysFont_Make(struct FontDesc* desc, const cc_string* fontName, int size, int flags) {
 	desc->size   = size;
 	desc->flags  = flags;
-	desc->height = Drawer2D_AdjHeight(size);
+	desc->height = BFONT_HEIGHT;
 
 	desc->handle = (void*)1;
 	return 0;
@@ -1111,6 +1115,307 @@ void SysFont_DrawText(struct DrawTextArgs* args, struct Bitmap* bmp, int x, int 
 			
 			DrawGlyph(bmp, x, y, cell, color);
 			x += BFONT_THIN_WIDTH;
+		}
+	}
+}
+#elif defined CC_BUILD_PSVITA
+#include <vitasdk.h>
+
+struct SysFont {
+	ScePvfFontId fontID;
+};
+#define TEXT_CEIL(x) (((x) + 63) >> 6)
+
+
+static void* lib_handle;
+static int inited;
+#define ALIGNUP4(x) (((x) + 3) & ~0x03)
+
+static void* Pvf_Alloc(void* userdata, unsigned int size) {
+	return Mem_TryAlloc(ALIGNUP4(size), 1);
+}
+
+static void* Pvf_Realloc(void* userdata, void* old_ptr, unsigned int size) {
+	return Mem_TryRealloc(old_ptr, ALIGNUP4(size), 1);
+}
+
+static void Pvf_Free(void* userdata, void* ptr) {
+	Mem_Free(ptr);
+}
+
+static void InitPvfLib(void) {
+	if (inited) return;
+	inited = true;
+	
+	ScePvfInitRec params = { 
+		NULL, SCE_PVF_MAX_OPEN, NULL, NULL,
+		Pvf_Alloc, Pvf_Realloc, Pvf_Free
+	};
+
+	ScePvfError error = 0;
+	lib_handle = scePvfNewLib(&params, &error);
+	if (error) {
+		Platform_Log1("PVF ERROR: %i", &error);
+		return;
+	}
+	
+	for (int i = 0; i < 128; i++) 
+	{
+		ScePvfFontStyleInfo fs;
+		error = scePvfGetFontInfoByIndexNumber(lib_handle, &fs, i);
+		if (error) { 
+			Platform_Log1("PVF F ERROR: %i", &error); continue;
+		}
+		
+		Platform_Log4("FONT %i = %c / %c / %c", &i, fs.fontName, fs.styleName, fs.fileName);
+		
+		int FC = fs. familyCode;
+		int ST = fs. style;
+		int LC = fs. languageCode;
+		int RC = fs. regionCode;
+		int CC = fs. countryCode;
+		
+		Platform_Log2("F_STYLE: %i, %i", &FC, &ST);
+		Platform_Log3("F_CODES: %i, %i, %i", &LC, &RC, &CC);
+		
+	}
+}
+
+void SysFonts_Register(const cc_string* path) { }
+
+const cc_string* SysFonts_UNSAFE_GetDefault(void) { return &String_Empty; }
+
+void SysFonts_GetNames(struct StringsBuffer* buffer) {
+	InitPvfLib();
+	if (!lib_handle) return;
+	
+	ScePvfError error = 0;
+	int count = scePvfGetNumFontList(lib_handle, &error);
+	if (error) return;
+	
+	for (int i = 0; i < count; i++) 
+	{
+		ScePvfFontStyleInfo fs;
+		error = scePvfGetFontInfoByIndexNumber(lib_handle, &fs, i);		
+		if (error) { Platform_Log1("PVF ERROR: %i", &error); continue; }
+		
+		if (fs.languageCode == SCE_PVF_LANGUAGE_LATIN) {
+			cc_string name = String_FromRawArray(fs.fileName);
+			StringsBuffer_Add(buffer, &name);
+		}
+	}
+}
+
+static ScePvfFontIndex FindFontByName(const cc_string* fontName) {
+	ScePvfError error = 0;
+	int count = scePvfGetNumFontList(lib_handle, &error);
+	if (error) return -1;
+	
+	for (int i = 0; i < count; i++) 
+	{
+		ScePvfFontStyleInfo fs;
+		error = scePvfGetFontInfoByIndexNumber(lib_handle, &fs, i);		
+		if (error) { Platform_Log1("PVF FBN ERROR: %i", &error); continue; }
+		
+		cc_string name = String_FromRawArray(fs.fileName);
+		if (String_CaselessEquals(fontName, &name)) return i;
+	}
+	return -1;
+}
+
+static ScePvfFontIndex FindDefaultFont(void) {
+	ScePvfFontStyleInfo style = { 0 };
+	style.languageCode = SCE_PVF_LANGUAGE_LATIN;
+
+	ScePvfError error = 0;
+	int index = scePvfFindOptimumFont(lib_handle, &style, &error);
+	
+	if (error) { Platform_Log1("PVF FDF ERROR: %i", &error); index = -1; }
+	return index;
+}
+
+
+static cc_result MakeSysFont(struct FontDesc* desc, const cc_string* fontName, int size, int flags) {
+	desc->size   = size;
+	desc->flags  = flags;
+	desc->height = Drawer2D_AdjHeight(size);
+
+	InitPvfLib();
+	if (!lib_handle) return ERR_NOT_SUPPORTED;
+	
+	struct SysFont* font = Mem_AllocCleared(sizeof(struct SysFont), 1, "font");
+	desc->handle = font;
+	
+	ScePvfFontIndex idx = -1;
+	if (fontName) {
+		idx = FindFontByName(fontName);
+	} else {
+		idx = FindDefaultFont();
+	}
+	if (idx == -1) return ERR_INVALID_ARGUMENT;
+	
+	
+	ScePvfError error = 0;
+	font->fontID = scePvfOpen(lib_handle, idx, 1, &error);
+	Platform_Log1("FONT ID: %i", &font->fontID);
+	
+	if (!error) {
+		ScePvfFontInfo fontInfo = { 0 };
+		int err2 = scePvfGetFontInfo(font->fontID, &fontInfo);
+		if (!err2) {
+			Platform_Log3("FONT METRICS: H %i, A %i, D %i", &fontInfo.maxIGlyphMetrics.height64,
+				&fontInfo.maxIGlyphMetrics.ascender64,&fontInfo.maxIGlyphMetrics.descender64);
+			Platform_Log3("FONT METRICS: X %i, Y %i, A %i", &fontInfo.maxIGlyphMetrics.horizontalBearingX64,
+				&fontInfo.maxIGlyphMetrics.horizontalBearingY64,&fontInfo.maxIGlyphMetrics.horizontalAdvance64);
+		}
+	}
+	
+	if (!error) {
+		float scale = size * 72.0f / 96.0f;
+		scePvfSetCharSize(font->fontID, scale, scale);
+	}
+	return error;
+}
+
+cc_result SysFont_Make(struct FontDesc* desc, const cc_string* fontName, int size, int flags) {
+	return MakeSysFont(desc, fontName, size, flags);
+}
+
+void SysFont_MakeDefault(struct FontDesc* desc, int size, int flags) {
+	cc_result res = MakeSysFont(desc, NULL, size, flags);
+	if (res) Logger_Abort2(res, "Failed to init default font");
+}
+
+void SysFont_Free(struct FontDesc* desc) {
+	struct SysFont* font = (struct SysFont*)desc->handle;
+	if (font->fontID) scePvfClose(font->fontID);
+	Mem_Free(font);
+}
+
+int SysFont_TextWidth(struct DrawTextArgs* args) {
+	struct SysFont* font = (struct SysFont*)args->font->handle;
+	ScePvfCharInfo charInfo;
+	
+	cc_string left = args->text, part;
+	char colorCode = 'f';	
+	int width = 0;
+
+	while (Drawer2D_UNSAFE_NextPart(&left, &part, &colorCode))
+	{
+		for (int i = 0; i < part.length; i++) 
+		{
+			// TODO optimise
+			ScePvfError error = scePvfGetCharInfo(font->fontID, (cc_uint8)part.buffer[i], &charInfo);
+			if (error) { Platform_Log1("PVF TW ERROR: %i", &error); continue; }
+			
+			width += charInfo.glyphMetrics.horizontalAdvance64;
+		}
+	}
+	
+	width = TEXT_CEIL(width);
+	Platform_Log2("TEXT WIDTH: %i (%s)", &width, &args->text);
+	if (args->useShadow) width += 2;
+	return max(1, width);
+}
+
+// TODO optimise
+static void RasteriseGlyph(ScePvfUserImageBufferRec* glyph, struct Bitmap* bmp, int x, int y) {
+	cc_uint8* src = glyph->buffer;
+	int glyphHeight = glyph->rect.height;
+	int glyphWidth  = glyph->rect.width;
+	
+	for (int glyphY = 0; glyphY < glyphHeight; glyphY++)
+	{
+		int dstY = glyphY + y;
+		if (dstY < 0 || dstY >= bmp->height) continue;		
+			
+		for (int glyphX = 0; glyphX < glyphWidth; glyphX++)
+		{
+			int dstX = glyphX + x;
+			if (dstX < 0 || dstX >= bmp->width) continue;
+			
+			cc_uint8 I = src[glyphY * glyphWidth + glyphX];
+
+			Bitmap_GetPixel(bmp, dstX, dstY) = BitmapCol_Make(I, I, I, 255);
+		}
+	}
+}
+
+// TODO optimise
+// See https://freetype.org/freetype2/docs/glyphs/glyphs-3.html
+static int DrawGlyph(struct SysFont* font, int size, struct Bitmap* bmp, int x, int y, cc_uint8 c) {
+	ScePvfCharInfo charInfo;
+	ScePvfIrect charRect;
+	ScePvfError error;
+			
+	error = scePvfGetCharInfo(font->fontID, c, &charInfo);
+	if (error) { Platform_Log1("PVF DG_GCI  ERROR: %i", &error); return 0; }
+
+	error = scePvfGetCharImageRect(font->fontID, c, &charRect);
+	if (error) { Platform_Log1("PVF DG_GCIR ERROR: %i", &error); return 0; }
+	
+	ScePvfUserImageBufferRec glyph = { 0 };
+	cc_uint8* tmp = Mem_Alloc(charRect.width * charRect.height, 1, "temp font bitmap");
+	//Mem_Set(tmp, 0x00, charRect.width * charRect.height);
+	glyph.pixelFormat  = SCE_PVF_USERIMAGE_DIRECT8;
+	glyph.rect.width   = charRect.width;
+	glyph.rect.height  = charRect.height;
+	glyph.bytesPerLine = charRect.width;
+	glyph.buffer       = tmp;
+	
+	//glyph.xPos64 = -charInfo.glyphMetrics.horizontalBearingX64;
+	//glyph.yPos64 = +charInfo.glyphMetrics.horizontalBearingY64;
+	
+	// TODO: use charInfo.glyphMetrics.horizontalBearingX64 and Y64
+	Platform_Log1("ABOUT %r:", &c);
+	int BX = charInfo.glyphMetrics.horizontalBearingX64, BX2 = TEXT_CEIL(BX);
+	int BY = charInfo.glyphMetrics.horizontalBearingY64, BY2 = TEXT_CEIL(BY);
+	//Platform_Log4("  Bitmap: %i,%i --> %i, %i", &charInfo.bitmapLeft, &charInfo.bitmapTop, &charInfo.bitmapWidth, &charInfo.bitmapHeight);
+	
+	int W = charInfo.glyphMetrics.width64,     W2 =TEXT_CEIL(W);
+	int H = charInfo.glyphMetrics.height64,    H2 =TEXT_CEIL(H);
+	int A = charInfo.glyphMetrics.ascender64,  A2 =TEXT_CEIL(A);
+	int D = charInfo.glyphMetrics.descender64, D2 =TEXT_CEIL(D);
+	
+	Platform_Log4("  Size: %i,%i   (%i, %i)", &W, &H, &W2, &H2);
+	Platform_Log4("  Vert: %i,%i   (%i, %i)", &A, &D, &A2, &D2);
+	Platform_Log4("  Bear: %i,%i   (%i, %i)", &BX, &BY, &BX2, &BY2);
+			
+	int CW = charRect.width, CH = charRect.height;
+	Platform_Log2("  CharSize: %i,%i", &CW, &CH);
+	
+	if (A2 < size) y += (size - A2);
+	
+	error = scePvfGetCharGlyphImage(font->fontID, c, &glyph);
+	if (!error) RasteriseGlyph(&glyph, bmp, x, y);
+	Mem_Free(tmp);
+	if (error) { Platform_Log1("PVF DG_CCGI ERROR: %i", &error); return 0; }
+	
+	return TEXT_CEIL(charInfo.glyphMetrics.horizontalAdvance64);
+}
+
+// TODO better shadow support
+void SysFont_DrawText(struct DrawTextArgs* args, struct Bitmap* bmp, int x, int y, cc_bool shadow) {
+	struct SysFont* font = (struct SysFont*)args->font->handle;
+	if (shadow) return;//{ x += 2; y += 2; }
+	
+	int W = SysFont_TextWidth(args);
+	int S = args->font->size;
+	int H = args->font->height;
+	Platform_Log3("TOTAL: %i  (%i/%i)", &W, &S, &H);
+	
+	cc_string left = args->text, part;
+	char colorCode = 'f';
+	BitmapCol color;
+
+	while (Drawer2D_UNSAFE_NextPart(&left, &part, &colorCode))
+	{
+		color = Drawer2D_GetColor(colorCode);
+		if (shadow) color = GetShadowColor(color);
+	
+		for (int i = 0; i < part.length; i++) 
+		{
+			x += DrawGlyph(font, S, bmp, x, y, (cc_uint16)part.buffer[i]);		
 		}
 	}
 }

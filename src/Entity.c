@@ -620,8 +620,11 @@ static void Entities_ChatFontChanged(void* obj) {
 }
 
 void Entities_Remove(EntityID id) {
+	struct Entity* e = Entities.List[id];
+	if (!e) return;
+
 	Event_RaiseInt(&EntityEvents.Removed, id);
-	Entities.List[id]->VTABLE->Despawn(Entities.List[id]);
+	e->VTABLE->Despawn(e);
 	Entities.List[id] = NULL;
 
 	/* TODO: Move to EntityEvents.Removed callback instead */
@@ -817,8 +820,8 @@ static void LocalPlayer_InputSet(int key, cc_bool pressed) {
 	struct HacksComp* hacks = &LocalPlayer_Instance.Hacks;
 
 	if (pressed && !hacks->Enabled) return;
-	if (key == KeyBinds[KEYBIND_SPEED])      hacks->Speeding     = pressed;
-	if (key == KeyBinds[KEYBIND_HALF_SPEED]) hacks->HalfSpeeding = pressed;
+	if (KeyBind_Claims(KEYBIND_SPEED, key))      hacks->Speeding     = pressed;
+	if (KeyBind_Claims(KEYBIND_HALF_SPEED, key)) hacks->HalfSpeeding = pressed;
 }
 
 static void LocalPlayer_InputDown(void* obj, int key, cc_bool was) {
@@ -1207,8 +1210,8 @@ static void Entities_Init(void) {
 
 static void Entities_Free(void) {
 	int i;
-	for (i = 0; i < ENTITIES_MAX_COUNT; i++) {
-		if (!Entities.List[i]) continue;
+	for (i = 0; i < ENTITIES_MAX_COUNT; i++) 
+	{
 		Entities_Remove((EntityID)i);
 	}
 	Gfx_DeleteTexture(&ShadowComponent_ShadowTex);
