@@ -270,6 +270,7 @@ void Window_Init(void) {
 
 	win_display = display;
 	win_rootWin = RootWindow(display, screen);
+	Input.Sources = INPUT_SOURCE_NORMAL;
 
 	/* TODO: Use Xinerama and XRandR for querying these */
 	DisplayInfo.Width  = DisplayWidth(display,  screen);

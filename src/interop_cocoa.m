@@ -150,6 +150,7 @@ static void LogUnhandledNSErrors(NSException* ex) {
 static NSAutoreleasePool* pool;
 void Window_Init(void) {
 	NSSetUncaughtExceptionHandler(LogUnhandledNSErrors);
+	Input.Sources = INPUT_SOURCE_NORMAL;
 
 	// https://www.cocoawithlove.com/2009/01/demystifying-nsapplication-by.html
 	pool = [[NSAutoreleasePool alloc] init];
@@ -244,12 +245,12 @@ static void RefreshWindowBounds(void) {
 @end
 
 
-static void DoDrawFramebuffer(CGRect dirty);
+static void DoDrawFramebuffer(NSRect dirty);
 @interface CCView : NSView { }
 @end
 @implementation CCView
 
-- (void)drawRect:(CGRect)dirty { DoDrawFramebuffer(dirty); }
+- (void)drawRect:(NSRect)dirty { DoDrawFramebuffer(dirty); }
 
 - (void)viewDidEndLiveResize {
 	// When the user users left mouse to drag reisze window, this enters 'live resize' mode
@@ -443,6 +444,7 @@ static int TryGetKey(NSEvent* ev) {
 }
 
 static void DebugScrollEvent(NSEvent* ev) {
+#ifdef kCGScrollWheelEventDeltaAxis1
 	float dy = [ev deltaY];
 	int steps = dy > 0.0f ? Math_Ceil(dy) : Math_Floor(dy);
 	
@@ -451,12 +453,13 @@ static void DebugScrollEvent(NSEvent* ev) {
 	int raw = CGEventGetIntegerValueField(ref, kCGScrollWheelEventDeltaAxis1);
 	
 	Platform_Log3("SCROLL: %i.0 = (%i, %f3)", &steps, &raw, &dy);
+#endif
 }
 
 void Window_ProcessEvents(double delta) {
 	NSEvent* ev;
 	int key, type, steps, x, y;
-	CGFloat dx, dy;
+	float dx, dy;
 	
 	// https://wiki.freepascal.org/Cocoa_Internals/Application 
 	[pool release];
@@ -560,7 +563,9 @@ void ShowDialogCore(const char* title, const char* msg) {
 
 static NSMutableArray* GetOpenSaveFilters(const char* const* filters) {
     NSMutableArray* types = [NSMutableArray array];
-    for (int i = 0; filters[i]; i++)
+    int i;
+
+    for (i = 0; filters[i]; i++)
     {
         NSString* filter = [NSString stringWithUTF8String:filters[i]];
         filter = [filter substringFromIndex:1];
@@ -630,7 +635,7 @@ void Window_AllocFramebuffer(struct Bitmap* bmp) {
 	fb_bmp = *bmp;
 }
 
-static void DoDrawFramebuffer(CGRect dirty) {
+static void DoDrawFramebuffer(NSRect dirty) {
 	CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
 	CGContextRef context = NULL;
 	CGDataProviderRef provider;
@@ -769,8 +774,8 @@ void GLContext_SetFpsLimit(cc_bool vsync, float minFrameMs) {
 	[ctxHandle setValues:&value forParameter: NSOpenGLCPSwapInterval];
 }
 
-/* kCGLCPCurrentRendererID is only defined on macOS 10.4 and later */
-#ifdef kCGLCPCurrentRendererID
+/* kCGLCPCurrentRendererID is only available on macOS 10.4 and later */
+#if defined MAC_OS_X_VERSION_10_4
 static const char* GetAccelerationMode(CGLContextObj ctx) {
 	GLint fGPU, vGPU;
 	
