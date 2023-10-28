@@ -155,18 +155,22 @@ irix:
 #  separate makefiles to avoid having one giant messy makefile
 psp:
 	$(MAKE) -f src/Makefile_PSP PLAT=psp
+vita:
+	$(MAKE) -f src/Makefile_vita PLAT=vita
+ps3:
+	$(MAKE) -f src/Makefile_PS3 PLAT=ps3
 3ds:
 	$(MAKE) -f src/Makefile_3DS PLAT=3ds
 wii:
 	$(MAKE) -f src/Makefile_wii PLAT=wii
 gamecube:
 	$(MAKE) -f src/Makefile_gamecube PLAT=gamecube
-xbox:
-	$(MAKE) -f src/Makefile_xbox PLAT=xbox
-vita:
-	$(MAKE) -f src/Makefile_vita PLAT=vita
 dreamcast:
 	$(MAKE) -f src/Makefile_dreamcast PLAT=dreamcast
+xbox:
+	$(MAKE) -f src/Makefile_xbox PLAT=xbox
+xbox360:
+	$(MAKE) -f src/Makefile_xbox PLAT=xbox360
 	
 clean:
 	$(DEL) $(OBJECTS)
