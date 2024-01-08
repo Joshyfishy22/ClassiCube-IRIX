@@ -26,7 +26,6 @@ static void RefreshWindowBounds(void) {
 	Event_RaiseVoid(&WindowEvents.Resized);
 }
 
-// https://developer.android.com/ndk/reference/group/input
 static int MapNativeKey(int code) {
 	if (code >= AKEYCODE_0  && code <= AKEYCODE_9)   return (code - AKEYCODE_0)  + '0';
 	if (code >= AKEYCODE_A  && code <= AKEYCODE_Z)   return (code - AKEYCODE_A)  + 'A';
@@ -97,8 +96,6 @@ static int MapNativeKey(int code) {
 
 	case AKEYCODE_BUTTON_START:  return CCPAD_START;
 	case AKEYCODE_BUTTON_SELECT: return CCPAD_SELECT;
-	case AKEYCODE_BUTTON_THUMBL: return CCPAD_LSTICK;
-	case AKEYCODE_BUTTON_THUMBR: return CCPAD_RSTICK;
 	}
 	return INPUT_NONE;
 }
@@ -302,7 +299,7 @@ static void RemakeWindowSurface(void) {
 	/* Loop until window gets created by main UI thread */
 	/* (i.e. until processSurfaceCreated is received) */
 	while (!winCreated) {
-		Window_ProcessEvents(0.01);
+		Window_ProcessEvents(0.0);
 		Thread_Sleep(10);
 	}
 
@@ -466,8 +463,8 @@ void Window_DrawFramebuffer(Rect2D r) {
 
 	/* window not created yet */
 	if (!win_handle) return;
-	b.left = r.x; b.right  = r.x + r.Width;
-	b.top  = r.y; b.bottom = r.y + r.Height;
+	b.left = r.X; b.right  = r.X + r.Width;
+	b.top  = r.Y; b.bottom = r.Y + r.Height;
 
 	/* Platform_Log4("DIRTY: %i,%i - %i,%i", &b.left, &b.top, &b.right, &b.bottom); */
 	res  = ANativeWindow_lock(win_handle, &buffer, &b);

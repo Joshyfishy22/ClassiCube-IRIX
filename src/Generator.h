@@ -12,24 +12,14 @@
 extern volatile float Gen_CurrentProgress;
 /* Name of the current step being performed */
 extern volatile const char* Gen_CurrentState;
+/* Whether map generation has completed */
+extern volatile cc_bool Gen_Done;
 extern int Gen_Seed;
+extern cc_bool Gen_Vanilla;
 extern BlockRaw* Gen_Blocks;
 
-/* Starts generating a map using the Gen_Active generator */
-void Gen_Start(void);
-/* Checks whether the map generator has completed yet */
-cc_bool Gen_IsDone(void);
-
-
-struct MapGenerator {
-	cc_bool (*Prepare)(void);
-	void   (*Generate)(void);
-};
-
-extern const struct MapGenerator* Gen_Active;
-extern const struct MapGenerator FlatgrassGen;
-extern const struct MapGenerator NotchyGen;
-
+void FlatgrassGen_Generate(void);
+void NotchyGen_Generate(void);
 
 extern BlockRaw* Tree_Blocks;
 extern RNGState* Tree_Rnd;

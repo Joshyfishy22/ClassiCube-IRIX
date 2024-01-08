@@ -538,82 +538,58 @@ union SocketAddress {
 	struct sockaddr_storage total;
 	#endif
 };
-/* Sanity check to ensure cc_sockaddr struct is large enough to contain all socket addresses supported by this platform */
-static char sockaddr_size_check[sizeof(union SocketAddress) < CC_SOCKETADDR_MAXSIZE ? 1 : -1];
 
-static cc_result ParseHost(const char* host, int port, cc_sockaddr* addrs, int* numValidAddrs) {
-	char portRaw[32]; cc_string portStr;
+static int ParseHost(union SocketAddress* addr, const char* host) {
 	struct addrinfo hints = { 0 };
 	struct addrinfo* result;
 	struct addrinfo* cur;
-	int res, i = 0;
+	int family = 0, res;
 
+	hints.ai_family   = AF_INET;
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_protocol = IPPROTO_TCP;
-	
-	String_InitArray(portStr,  portRaw);
-	String_AppendInt(&portStr, port);
-	portRaw[portStr.length] = '\0';
 
-	res = getaddrinfo(host, portRaw, &hints, &result);
-	if (res == EAI_AGAIN) return SOCK_ERR_UNKNOWN_HOST;
-	if (res) return res;
+	res = getaddrinfo(host, NULL, &hints, &result);
+	if (res) return 0;
 
-	/* Prefer IPv4 addresses first */
-	for (cur = result; cur && i < SOCKET_MAX_ADDRS; cur = cur->ai_next) 
-	{
+	for (cur = result; cur; cur = cur->ai_next) {
 		if (cur->ai_family != AF_INET) continue;
-		Mem_Copy(addrs[i].data, cur->ai_addr, cur->ai_addrlen);
-		addrs[i].size = cur->ai_addrlen; i++;
-	}
-	
-	for (cur = result; cur && i < SOCKET_MAX_ADDRS; cur = cur->ai_next) 
-	{
-		if (cur->ai_family == AF_INET) continue;
-		Mem_Copy(addrs[i].data, cur->ai_addr, cur->ai_addrlen);
-		addrs[i].size = cur->ai_addrlen; i++;
+		family = AF_INET;
+
+		Mem_Copy(addr, cur->ai_addr, cur->ai_addrlen);
+		break;
 	}
 
 	freeaddrinfo(result);
-	*numValidAddrs = i;
-	return i == 0 ? ERR_INVALID_ARGUMENT : 0;
+	return family;
 }
 
-cc_result Socket_ParseAddress(const cc_string* address, int port, cc_sockaddr* addrs, int* numValidAddrs) {
-	union SocketAddress* addr = (union SocketAddress*)addrs[0].data;
+static int ParseAddress(union SocketAddress* addr, const cc_string* address) {
 	char str[NATIVE_STR_LEN];
-
 	String_EncodeUtf8(str, address);
-	*numValidAddrs = 0;
 
-	if (inet_pton(AF_INET,  str, &addr->v4.sin_addr)  > 0) {
-		addr->v4.sin_family = AF_INET;
-		addr->v4.sin_port   = htons(port);
-		
-		addrs[0].size  = sizeof(addr->v4);
-		*numValidAddrs = 1;
-		return 0;
-	}
-	
+	if (inet_pton(AF_INET,  str, &addr->v4.sin_addr)  > 0) return AF_INET;
 	#ifdef AF_INET6
-	if (inet_pton(AF_INET6, str, &addr->v6.sin6_addr) > 0) {
-		addr->v6.sin6_family = AF_INET6;
-		addr->v6.sin6_port   = htons(port);
-		
-		addrs[0].size  = sizeof(addr->v6);
-		*numValidAddrs = 1;
-		return 0;
-	}
+	if (inet_pton(AF_INET6, str, &addr->v6.sin6_addr) > 0) return AF_INET6;
 	#endif
-	
-	return ParseHost(str, port, addrs, numValidAddrs);
+	return ParseHost(addr, str);
 }
 
-cc_result Socket_Connect(cc_socket* s, cc_sockaddr* addr, cc_bool nonblocking) {
-	struct sockaddr* raw = (struct sockaddr*)addr->data;
+int Socket_ValidAddress(const cc_string* address) {
+	union SocketAddress addr;
+	return ParseAddress(&addr, address);
+}
+
+cc_result Socket_Connect(cc_socket* s, const cc_string* address, int port, cc_bool nonblocking) {
+	int family, addrSize = 0;
+	union SocketAddress addr;
 	cc_result res;
 
-	*s = socket(raw->sa_family, SOCK_STREAM, IPPROTO_TCP);
+	*s = -1;
+	if (!(family = ParseAddress(&addr, address)))
+		return ERR_INVALID_ARGUMENT;
+
+	*s = socket(family, SOCK_STREAM, IPPROTO_TCP);
 	if (*s == -1) return errno;
 
 	if (nonblocking) {
@@ -621,7 +597,20 @@ cc_result Socket_Connect(cc_socket* s, cc_sockaddr* addr, cc_bool nonblocking) {
 		ioctl(*s, FIONBIO, &blocking_raw);
 	}
 
-	res = connect(*s, raw, addr->size);
+	#ifdef AF_INET6
+	if (family == AF_INET6) {
+		addr.v6.sin6_family = AF_INET6;
+		addr.v6.sin6_port   = htons(port);
+		addrSize = sizeof(addr.v6);
+	}
+	#endif
+	if (family == AF_INET) {
+		addr.v4.sin_family  = AF_INET;
+		addr.v4.sin_port    = htons(port);
+		addrSize = sizeof(addr.v4);
+	}
+
+	res = connect(*s, &addr.raw, addrSize);
 	return res == -1 ? errno : 0;
 }
 
@@ -697,8 +686,6 @@ cc_result Socket_CheckWritable(cc_socket s, cc_bool* writable) {
 /*########################################################################################################################*
 *-----------------------------------------------------Process/Module------------------------------------------------------*
 *#########################################################################################################################*/
-cc_bool Process_OpenSupported = true;
-
 #if defined CC_BUILD_ANDROID
 /* implemented in Platform_Android.c */
 #elif defined CC_BUILD_IOS
@@ -878,12 +865,7 @@ static cc_result Process_RawGetExePath(char* path, int* len) {
 /*########################################################################################################################*
 *--------------------------------------------------------Updater----------------------------------------------------------*
 *#########################################################################################################################*/
-#ifdef CC_BUILD_FLATPAK
-cc_bool Updater_Supported = false;
-#else
 cc_bool Updater_Supported = true;
-#endif
-
 #if defined CC_BUILD_ANDROID
 /* implemented in Platform_Android.c */
 #elif defined CC_BUILD_IOS

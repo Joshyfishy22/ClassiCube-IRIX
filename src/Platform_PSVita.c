@@ -90,7 +90,7 @@ int File_Exists(const cc_string* path) {
 	char str[NATIVE_STR_LEN];
 	SceIoStat sb;
 	GetNativePath(str, path);
-	return sceIoGetstat(str, &sb) == 0 && SCE_S_ISREG(sb.st_mode) != 0;
+	return sceIoGetstat(str, &sb) == 0 && (sb.st_attr & SCE_SO_IFREG) != 0;
 }
 
 cc_result Directory_Enum(const cc_string* dirPath, void* obj, Directory_EnumCallback callback) {
@@ -161,7 +161,7 @@ cc_result File_Write(cc_file file, const void* data, cc_uint32 count, cc_uint32*
 }
 
 cc_result File_Close(cc_file file) {
-	int result = sceIoClose(file);
+	int result = sceIoDclose(file);
 	return GetSCEResult(result);
 }
 
@@ -280,45 +280,52 @@ void Waitable_WaitFor(void* handle, cc_uint32 milliseconds) {
 /*########################################################################################################################*
 *---------------------------------------------------------Socket----------------------------------------------------------*
 *#########################################################################################################################*/
-cc_result Socket_ParseAddress(const cc_string* address, int port, cc_sockaddr* addrs, int* numValidAddrs) {
-	struct SceNetSockaddrIn* addr4 = (struct SceNetSockaddrIn*)addrs[0].data;
-	char str[NATIVE_STR_LEN];
-	char buf[1024];
-	int rid, ret;
-	
-	String_EncodeUtf8(str, address);
-	*numValidAddrs = 1;
+union SocketAddress {
+	struct SceNetSockaddr raw;
+	struct SceNetSockaddrIn v4;
+};
 
-	if (sceNetInetPton(SCE_NET_AF_INET, str, &addr4->sin_addr) <= 0) {
-		/* Fallback to resolving as DNS name */
-		rid = sceNetResolverCreate("CC resolver", NULL, 0);
-		if (rid < 0) return ERR_INVALID_ARGUMENT;
+static int ParseHost(union SocketAddress* addr, const char* host) {
+	int rid = sceNetResolverCreate("CC resolver", NULL, 0);
+	if (rid < 0) return ERR_INVALID_ARGUMENT;
 
-		ret = sceNetResolverStartNtoa(rid, str, &addr4->sin_addr, 0, 0, 0);
-		sceNetResolverDestroy(rid);
-		if (ret) return ret;
-	}
-	
-	addr4->sin_family = SCE_NET_AF_INET;
-	addr4->sin_port   = sceNetHtons(port);
-		
-	addrs[0].size = sizeof(*addr4);
-	return 0;
+	int ret = sceNetResolverStartNtoa(rid, host, &addr->v4.sin_addr, 1 /* timeout */, 5 /* retries */, 0 /* flags */);
+	sceNetResolverDestroy(rid);
+	return ret;
 }
 
-cc_result Socket_Connect(cc_socket* s, cc_sockaddr* addr, cc_bool nonblocking) {
-	struct SceNetSockaddr* raw = (struct SceNetSockaddr*)addr->data;
+static int ParseAddress(union SocketAddress* addr, const cc_string* address) {
+	char str[NATIVE_STR_LEN];
+	String_EncodeUtf8(str, address);
+
+	if (sceNetInetPton(SCE_NET_AF_INET, str, &addr->v4.sin_addr) > 0) return 0;
+	return ParseHost(addr, str);
+}
+
+int Socket_ValidAddress(const cc_string* address) {
+	union SocketAddress addr;
+	return ParseAddress(&addr, address) == 0;
+}
+
+cc_result Socket_Connect(cc_socket* s, const cc_string* address, int port, cc_bool nonblocking) {
+	union SocketAddress addr;
 	int res;
 
-	*s = sceNetSocket("CC socket", raw->sa_family, SCE_NET_SOCK_STREAM, SCE_NET_IPPROTO_TCP);
+	*s = -1;
+	if ((res = ParseAddress(&addr, address))) return res;
+
+	*s = sceNetSocket("CC socket", SCE_NET_AF_INET, SCE_NET_SOCK_STREAM, SCE_NET_IPPROTO_TCP);
 	if (*s < 0) return *s;
 	
 	if (nonblocking) {
 		int on = 1;
 		sceNetSetsockopt(*s, SCE_NET_SOL_SOCKET, SCE_NET_SO_NBIO, &on, sizeof(int));
 	}
+	
+	addr.v4.sin_family = SCE_NET_AF_INET;
+	addr.v4.sin_port   = sceNetHtons(port);
 
-	res = sceNetConnect(*s, raw, addr->size);
+	res = sceNetConnect(*s, &addr.raw, sizeof(addr.v4));
 	return res;
 }
 
@@ -354,9 +361,9 @@ static cc_result Socket_Poll(cc_socket s, int mode, cc_bool* success) {
 	if ((res = sceNetEpollControl(epoll_id, SCE_NET_EPOLL_CTL_ADD, s, &ev))) return res;	
 	num_events = sceNetEpollWait(epoll_id, &ev, 1, 0);
 	sceNetEpollControl(epoll_id, SCE_NET_EPOLL_CTL_DEL, s, NULL);
-
+	
 	if (num_events < 0)  return num_events;
-	if (num_events == 0) { *success = false; return 0; }
+	if (num_events == 0) return ERR_NOT_SUPPORTED; // TODO when can this ever happen?
 	
 	*success = (ev.events & flags) != 0;
 	return 0;
@@ -380,23 +387,13 @@ cc_result Socket_CheckWritable(cc_socket s, cc_bool* writable) {
 /*########################################################################################################################*
 *--------------------------------------------------------Platform---------------------------------------------------------*
 *#########################################################################################################################*/
-static char net_memory[512 * 1024] __attribute__ ((aligned (16))); // TODO is just 256 kb enough ?
-
-static void InitNetworking(void) {
-	sceSysmoduleLoadModule(SCE_SYSMODULE_NET);	
-	SceNetInitParam param;
-	
-	param.memory = net_memory;
-	param.size   = sizeof(net_memory);
-	param.flags  = 0;
-	
-	int ret = sceNetInit(&param);
-	if (ret < 0) Platform_Log1("Network init failed: %i", &ret);
+cc_result Process_StartOpen(const cc_string* args) {
+	return ERR_NOT_SUPPORTED;
 }
 
 void Platform_Init(void) {
 	/*pspDebugSioInit();*/ 
-	InitNetworking();
+	// TODO: sceNetInit();
 	epoll_id = sceNetEpollCreate("CC poll", 0);
 }
 void Platform_Free(void) { }

@@ -34,11 +34,11 @@ const char* Platform_AppNameSuffix = " Dreamcast";
 *#########################################################################################################################*/
 cc_uint64 Stopwatch_ElapsedMicroseconds(cc_uint64 beg, cc_uint64 end) {
 	if (end < beg) return 0;
-	return end - beg;
+	return (end - beg) / 1000;
 }
 
 cc_uint64 Stopwatch_Measure(void) {
-	return timer_us_gettime64();
+	return timer_ns_gettime64();
 }
 
 void Platform_Log(const char* msg, int len) {
@@ -55,13 +55,10 @@ TimeMS DateTime_CurrentUTC_MS(void) {
 }
 
 void DateTime_CurrentLocal(struct DateTime* t) {
-	uint32 secs, ms;
-	time_t total_secs;
+	struct timeval cur; 
 	struct tm loc_time;
-	
-	timer_ms_gettime(&secs, &ms);
-	total_secs = rtc_boot_time() + secs;
-	localtime_r(&total_secs, &loc_time);
+	gettimeofday(&cur, NULL);
+	localtime_r(&cur.tv_sec, &loc_time);
 
 	t->year   = loc_time.tm_year + 1900;
 	t->month  = loc_time.tm_mon  + 1;
@@ -197,7 +194,7 @@ cc_result File_Length(cc_file file, cc_uint32* len) {
 /*########################################################################################################################*
 *--------------------------------------------------------Threading--------------------------------------------------------*
 *#########################################################################################################################*/
-// !!! NOTE: Dreamcast is configured to use preemptive multithreading !!!
+// !!! NOTE: Dreamcast uses cooperative multithreading (not preemptive multithreading) !!!
 void Thread_Sleep(cc_uint32 milliseconds) { 
 	thd_sleep(milliseconds); 
 }
@@ -284,52 +281,88 @@ void Waitable_WaitFor(void* handle, cc_uint32 milliseconds) {
 /*########################################################################################################################*
 *---------------------------------------------------------Socket----------------------------------------------------------*
 *#########################################################################################################################*/
-cc_result Socket_ParseAddress(const cc_string* address, int port, cc_sockaddr* addrs, int* numValidAddrs) {
-	char str[NATIVE_STR_LEN];
+union SocketAddress {
+	struct sockaddr raw;
+	struct sockaddr_in  v4;
+	#ifdef AF_INET6
+	struct sockaddr_in6 v6;
+	struct sockaddr_storage total;
+	#endif
+};
 
-	char portRaw[32]; cc_string portStr;
+static int ParseHost(union SocketAddress* addr, const char* host) {
 	struct addrinfo hints = { 0 };
 	struct addrinfo* result;
 	struct addrinfo* cur;
-	int res, i = 0;
-	
-	String_EncodeUtf8(str, address);
-	*numValidAddrs = 0;
+	int family = 0, res;
 
+	hints.ai_family   = AF_INET;
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_protocol = IPPROTO_TCP;
-	
-	String_InitArray(portStr,  portRaw);
-	String_AppendInt(&portStr, port);
-	portRaw[portStr.length] = '\0';
 
-	res = getaddrinfo(str, portRaw, &hints, &result);
-	if (res == EAI_NONAME) return SOCK_ERR_UNKNOWN_HOST;
-	if (res) return res;
+	res = getaddrinfo(host, NULL, &hints, &result);
+	if (res) return 0;
 
-	for (cur = result; cur && i < SOCKET_MAX_ADDRS; cur = cur->ai_next, i++) 
-	{
-		Mem_Copy(addrs[i].data, cur->ai_addr, cur->ai_addrlen);
-		addrs[i].size = cur->ai_addrlen;
+	for (cur = result; cur; cur = cur->ai_next) {
+		if (cur->ai_family != AF_INET) continue;
+		family = AF_INET;
+
+		Mem_Copy(addr, cur->ai_addr, cur->ai_addrlen);
+		break;
 	}
 
 	freeaddrinfo(result);
-	*numValidAddrs = i;
-	return i == 0 ? ERR_INVALID_ARGUMENT : 0;
+	return family;
 }
 
-cc_result Socket_Connect(cc_socket* s, cc_sockaddr* addr, cc_bool nonblocking) {
-	struct sockaddr* raw = (struct sockaddr*)addr->data;
+static int ParseAddress(union SocketAddress* addr, const cc_string* address) {
+	char str[NATIVE_STR_LEN];
+	String_EncodeUtf8(str, address);
+
+	if (inet_pton(AF_INET,  str, &addr->v4.sin_addr)  > 0) return AF_INET;
+	#ifdef AF_INET6
+	if (inet_pton(AF_INET6, str, &addr->v6.sin6_addr) > 0) return AF_INET6;
+	#endif
+	return ParseHost(addr, str);
+}
+
+int Socket_ValidAddress(const cc_string* address) {
+	union SocketAddress addr;
+	return ParseAddress(&addr, address);
+}
+
+cc_result Socket_Connect(cc_socket* s, const cc_string* address, int port, cc_bool nonblocking) {
+	int family, addrSize = 0;
+	union SocketAddress addr;
 	cc_result res;
 
-	*s = socket(raw->sa_family, SOCK_STREAM, IPPROTO_TCP);
+	*s = -1;
+	if (!(family = ParseAddress(&addr, address)))
+		return ERR_INVALID_ARGUMENT;
+
+	*s = socket(family, SOCK_STREAM, IPPROTO_TCP);
 	if (*s == -1) return errno;
 
+	// TODO is this even right
 	if (nonblocking) {
-		fcntl(*s, F_SETFL, O_NONBLOCK);
+		int blocking_raw = -1; /* non-blocking mode */
+		fs_ioctl(*s, FNONBIO, &blocking_raw);
 	}
 
-	res = connect(*s, raw, addr->size);
+	#ifdef AF_INET6
+	if (family == AF_INET6) {
+		addr.v6.sin6_family = AF_INET6;
+		addr.v6.sin6_port   = htons(port);
+		addrSize = sizeof(addr.v6);
+	}
+	#endif
+	if (family == AF_INET) {
+		addr.v4.sin_family  = AF_INET;
+		addr.v4.sin_port    = htons(port);
+		addrSize = sizeof(addr.v4);
+	}
+
+	res = connect(*s, &addr.raw, addrSize);
 	return res == -1 ? errno : 0;
 }
 
@@ -382,7 +415,13 @@ cc_result Socket_CheckWritable(cc_socket s, cc_bool* writable) {
 /*########################################################################################################################*
 *--------------------------------------------------------Platform---------------------------------------------------------*
 *#########################################################################################################################*/
+cc_result Process_StartOpen(const cc_string* args) {
+	return ERR_NOT_SUPPORTED;
+}
+
 void Platform_Init(void) {
+	/*pspDebugSioInit();*/ 
+	
 	char cwd[600] = { 0 };
 	char* ptr = getcwd(cwd, 600);
 	Platform_Log1("WORKING DIR: %c", ptr);

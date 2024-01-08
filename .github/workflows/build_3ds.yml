@@ -17,7 +17,6 @@ jobs:
         id: compile
         run: |
           make 3ds
-          
 
       - uses: ./.github/actions/notify_failure
         if: ${{ always() && steps.compile.outcome == 'failure' }}
@@ -25,15 +24,8 @@ jobs:
           NOTIFY_MESSAGE: 'Failed to compile 3DS build'
           WEBHOOK_URL: '${{ secrets.WEBHOOK_URL }}'
           
-          
       - uses: ./.github/actions/upload_build
         if: ${{ always() && steps.compile.outcome == 'success' }}
         with:
           SOURCE_FILE: 'ClassiCube-3ds.3dsx'
           DEST_NAME: 'ClassiCube-3ds.3dsx'
-          
-      - uses: ./.github/actions/upload_build
-        if: ${{ always() && steps.compile.outcome == 'success' }}
-        with:
-          SOURCE_FILE: 'ClassiCube-3ds.elf'
-          DEST_NAME: 'ClassiCube-3ds.elf'

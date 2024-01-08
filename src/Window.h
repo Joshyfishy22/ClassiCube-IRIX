@@ -52,15 +52,11 @@ CC_VAR extern struct _DisplayData {
 	/* GUI elements must be scaled by this to look correct. */
 	float ScaleX, ScaleY;
 	/* Position of this display. (may be non-zero in multi-monitor setup. Platform dependent) */
-	int x, y;
+	int X, Y;
 	/* Size/Dimensions of this display in pixels. */
 	int Width, Height;
 	/* Whether accounting for system DPI scaling is enabled */
 	cc_bool DPIScaling;
-	/* Amount to offset content near the edges of the window by */
-	/*  Mainly intended for when the game is rendered on TV displays, where */
-	/*  pixels on the edges of the screen may be hidden due to overscan */
-	int ContentOffsetX, ContentOffsetY;
 } DisplayInfo;
 
 /* Scales the given X coordinate from 96 dpi to current display dpi. */

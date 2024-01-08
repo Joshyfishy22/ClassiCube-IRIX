@@ -34,7 +34,8 @@ void Platform_Log(const char* msg, int len) {
 	Mem_Copy(tmp, msg, len); tmp[len] = '\0';
 	
 	// log to on-screen display
-	debugPrint("%s\n", tmp);
+	debugPrint(tmp);
+	debugPrint("\n");
 	// log to cxbx-reloaded console
 	OutputDebugStringA(tmp);
 }
@@ -296,44 +297,62 @@ void Waitable_WaitFor(void* handle, cc_uint32 milliseconds) {
 /*########################################################################################################################*
 *---------------------------------------------------------Socket----------------------------------------------------------*
 *#########################################################################################################################*/
-cc_result Socket_ParseAddress(const cc_string* address, int port, cc_sockaddr* addrs, int* numValidAddrs) {
-	char str[NATIVE_STR_LEN];
-	char portRaw[32]; cc_string portStr;
+union SocketAddress {
+	struct sockaddr raw;
+	struct sockaddr_in v4;
+};
+
+static int ParseHost(union SocketAddress* addr, const char* host) {
 	struct addrinfo hints = { 0 };
 	struct addrinfo* result;
 	struct addrinfo* cur;
-	int i = 0;
-	
-	String_EncodeUtf8(str, address);
-	*numValidAddrs = 0;
+	int found = 0, res;
 
+	hints.ai_family   = AF_INET;
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_protocol = IPPROTO_TCP;
-	
-	String_InitArray(portStr,  portRaw);
-	String_AppendInt(&portStr, port);
-	portRaw[portStr.length] = '\0';
 
-	int res = lwip_getaddrinfo(str, portRaw, &hints, &result);
-	if (res == EAI_FAIL) return SOCK_ERR_UNKNOWN_HOST;
+	res = lwip_getaddrinfo(host, NULL, &hints, &result);
 	if (res) return res;
 
-	for (cur = result; cur && i < SOCKET_MAX_ADDRS; cur = cur->ai_next, i++) 
-	{
-		Mem_Copy(addrs[i].data, cur->ai_addr, cur->ai_addrlen);
-		addrs[i].size = cur->ai_addrlen;
+	for (cur = result; cur; cur = cur->ai_next) {
+		if (cur->ai_family != AF_INET) continue;
+		found = true;
+
+		Mem_Copy(addr, cur->ai_addr, cur->ai_addrlen);
+		break;
 	}
 
 	lwip_freeaddrinfo(result);
-	*numValidAddrs = i;
-	return i == 0 ? ERR_INVALID_ARGUMENT : 0;
+	return found ? 0 : ERR_INVALID_ARGUMENT;
 }
 
-cc_result Socket_Connect(cc_socket* s, cc_sockaddr* addr, cc_bool nonblocking) {
-	struct sockaddr* raw = (struct sockaddr*)addr->data;
-	int res;
+static int ParseAddress(union SocketAddress* addr, const cc_string* address) {
+	char str[NATIVE_STR_LEN];
+	String_EncodeUtf8(str, address);
 
-	*s = lwip_socket(raw->sa_family, SOCK_STREAM, 0);
+	if (inet_pton(AF_INET, str, &addr->v4.sin_addr) > 0) return 0;
+	return ParseHost(addr, str);
+}
+
+int Socket_ValidAddress(const cc_string* address) {
+	union SocketAddress addr;
+	return ParseAddress(&addr, address) == 0;
+}
+
+cc_result Socket_Connect(cc_socket* s, const cc_string* address, int port, cc_bool nonblocking) {
+	int family, addrSize = 0;
+	union SocketAddress addr;
+	int res;
+	// TODO TODO TODO TODO TODO
+	// if 'addrSize = 0' is removed, then the game never gets past 'Fetching cdn.classicube.net...'
+	// so probably relying on undefined behaviour somewhere...
+
+	*s  = -1;
+	res = ParseAddress(&addr, address);
+	if (res) return res;
+
+	*s = lwip_socket(AF_INET, SOCK_STREAM, 0);
 	if (*s == -1) return errno;
 
 	if (nonblocking) {
@@ -341,7 +360,10 @@ cc_result Socket_Connect(cc_socket* s, cc_sockaddr* addr, cc_bool nonblocking) {
 		lwip_ioctl(*s, FIONBIO, &blocking_raw);
 	}
 
-	res = lwip_connect(*s, raw, addr->size);
+	addr.v4.sin_family = AF_INET;
+	addr.v4.sin_port   = htons(port);
+
+	res = lwip_connect(*s, &addr.raw, sizeof(addr.v4));
 	return res == -1 ? errno : 0;
 }
 
@@ -394,13 +416,12 @@ cc_result Socket_CheckWritable(cc_socket s, cc_bool* writable) {
 /*########################################################################################################################*
 *--------------------------------------------------------Platform---------------------------------------------------------*
 *#########################################################################################################################*/
+cc_result Process_StartOpen(const cc_string* args) {
+	return ERR_NOT_SUPPORTED;
+}
+
 static void InitHDD(void) {
-	if (nxIsDriveMounted('E')) {
-		hdd_mounted = true;
-	} else {
-		hdd_mounted = nxMountDrive('E', "\\Device\\Harddisk0\\Partition1\\");
-	}
-    
+    hdd_mounted = nxMountDrive('E', "\\Device\\Harddisk0\\Partition1\\");
     if (!hdd_mounted) {
         Platform_LogConst("Failed to mount E:/ from Data partition");
         return;

@@ -72,23 +72,10 @@ static void guInit(void) {
 
 static GfxResourceID white_square;
 void Gfx_Create(void) {
-	if (!Gfx.Created) guInit();
-	
 	Gfx.MaxTexWidth  = 512;
 	Gfx.MaxTexHeight = 512;
 	Gfx.Created      = true;
-	gfx_vsync        = true;
-	
-	Gfx_RestoreState();
-}
-
-void Gfx_Free(void) { 
-	Gfx_FreeState();
-}
-
-cc_bool Gfx_TryRestoreContext(void) { return true; }
-
-void Gfx_RestoreState(void) {
+	guInit();
 	InitDefaultResources();
 	
 	// 1x1 dummy white texture
@@ -98,11 +85,14 @@ void Gfx_RestoreState(void) {
 	white_square = Gfx_CreateTexture(&bmp, 0, false);
 }
 
-void Gfx_FreeState(void) {
+void Gfx_Free(void) { 
 	FreeDefaultResources(); 
 	Gfx_DeleteTexture(&white_square);
 }
 
+cc_bool Gfx_TryRestoreContext(void) { return true; }
+void Gfx_RestoreState(void) { }
+void Gfx_FreeState(void) { }
 #define GU_Toggle(cap) if (enabled) { sceGuEnable(cap); } else { sceGuDisable(cap); }
 
 /*########################################################################################################################*
@@ -114,7 +104,7 @@ typedef struct CCTexture_ {
 	cc_uint32 pixels[];
 } CCTexture;
 
-static GfxResourceID Gfx_AllocTexture(struct Bitmap* bmp, cc_uint8 flags, cc_bool mipmaps) {
+GfxResourceID Gfx_CreateTexture(struct Bitmap* bmp, cc_uint8 flags, cc_bool mipmaps) {
 	int size = bmp->width * bmp->height * 4;
 	CCTexture* tex = (CCTexture*)memalign(16, 16 + size);
 	
@@ -201,13 +191,13 @@ void Gfx_CalcOrthoMatrix(struct Matrix* matrix, float width, float height, float
 	// NOTE: Shared with OpenGL. might be wrong to do that though?
 	*matrix = Matrix_Identity;
 
-	matrix->row1.x =  2.0f / width;
-	matrix->row2.y = -2.0f / height;
-	matrix->row3.z = -2.0f / (zFar - zNear);
+	matrix->row1.X =  2.0f / width;
+	matrix->row2.Y = -2.0f / height;
+	matrix->row3.Z = -2.0f / (zFar - zNear);
 
-	matrix->row4.x = -1.0f;
-	matrix->row4.y =  1.0f;
-	matrix->row4.z = -(zFar + zNear) / (zFar - zNear);
+	matrix->row4.X = -1.0f;
+	matrix->row4.Y =  1.0f;
+	matrix->row4.Z = -(zFar + zNear) / (zFar - zNear);
 }
 
 static double Cotangent(double x) { return Math_Cos(x) / Math_Sin(x); }
@@ -221,12 +211,12 @@ void Gfx_CalcPerspectiveMatrix(struct Matrix* matrix, float fov, float aspect, f
 	// Calculations are simplified because of left/right and top/bottom symmetry
 	*matrix = Matrix_Identity;
 
-	matrix->row1.x =  c / aspect;
-	matrix->row2.y =  c;
-	matrix->row3.z = -(zFar + zNear) / (zFar - zNear);
-	matrix->row3.w = -1.0f;
-	matrix->row4.z = -(2.0f * zFar * zNear) / (zFar - zNear);
-	matrix->row4.w =  0.0f;
+	matrix->row1.X =  c / aspect;
+	matrix->row2.Y =  c;
+	matrix->row3.Z = -(zFar + zNear) / (zFar - zNear);
+	matrix->row3.W = -1.0f;
+	matrix->row4.Z = -(2.0f * zFar * zNear) / (zFar - zNear);
+	matrix->row4.W =  0.0f;
 	// TODO: should direct3d9 one be used insted with clip range from 0,1 ?
 }
 
@@ -239,8 +229,8 @@ cc_result Gfx_TakeScreenshot(struct Stream* output) {
 }
 
 void Gfx_GetApiInfo(cc_string* info) {
-	String_AppendConst(info, "-- Using PSP--\n");
-	PrintMaxTextureInfo(info);
+	String_Format1(info, "-- Using PSP--\n", NULL);
+	String_Format2(info, "Max texture size: (%i, %i)\n", &Gfx.MaxTexWidth, &Gfx.MaxTexHeight);
 }
 
 void Gfx_SetFpsLimit(cc_bool vsync, float minFrameMs) {
@@ -266,7 +256,8 @@ void Gfx_OnWindowResize(void) { }
 
 
 static cc_uint8* gfx_vertices;
-static int gfx_fields;
+/* Current format and size of vertices */
+static int gfx_stride, gfx_format = -1, gfx_fields;
 
 
 /*########################################################################################################################*
@@ -283,8 +274,11 @@ void Gfx_BindIb(GfxResourceID ib)    { }
 void Gfx_DeleteIb(GfxResourceID* ib) { }
 
 
-static GfxResourceID Gfx_AllocStaticVb(VertexFormat fmt, int count) {
-	return memalign(16, count * strideSizes[fmt]);
+GfxResourceID Gfx_CreateVb(VertexFormat fmt, int count) {
+	void* data = memalign(16, count * strideSizes[fmt]);
+	if (!data) Logger_Abort("Failed to allocate memory for GFX VB");
+	return data;
+	//return Mem_Alloc(count, strideSizes[fmt], "gfx VB");
 }
 
 void Gfx_BindVb(GfxResourceID vb) { gfx_vertices = vb; }
@@ -306,11 +300,12 @@ void Gfx_UnlockVb(GfxResourceID vb) {
 }
 
 
-static GfxResourceID Gfx_AllocDynamicVb(VertexFormat fmt, int maxVertices) {
-	return memalign(16, maxVertices * strideSizes[fmt]);
+GfxResourceID Gfx_CreateDynamicVb(VertexFormat fmt, int maxVertices) {
+	void* data = memalign(16, maxVertices * strideSizes[fmt]);
+	if (!data) Logger_Abort("Failed to allocate memory for GFX VB");
+	return data;
+	//return Mem_Alloc(maxVertices, strideSizes[fmt], "gfx VB");
 }
-
-void Gfx_BindDynamicVb(GfxResourceID vb) { Gfx_BindVb(vb); }
 
 void* Gfx_LockDynamicVb(GfxResourceID vb, VertexFormat fmt, int count) {
 	vb_size = count * strideSizes[fmt];
@@ -322,7 +317,11 @@ void Gfx_UnlockDynamicVb(GfxResourceID vb) {
 	sceKernelDcacheWritebackInvalidateRange(vb, vb_size);
 }
 
-void Gfx_DeleteDynamicVb(GfxResourceID* vb) { Gfx_DeleteVb(vb); }
+void Gfx_SetDynamicVbData(GfxResourceID vb, void* vertices, int vCount) {
+	gfx_vertices = vb;
+	Mem_Copy(vb, vertices, vCount * gfx_stride);
+	sceKernelDcacheWritebackInvalidateRange(vertices, vCount * gfx_stride);
+}
 
 
 /*########################################################################################################################*

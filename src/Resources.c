@@ -1,5 +1,5 @@
 #include "Resources.h"
-#ifdef CC_BUILD_RESOURCES
+#if !defined CC_BUILD_WEB
 #include "Funcs.h"
 #include "String.h"
 #include "Constants.h"
@@ -1050,9 +1050,7 @@ static const struct AssetSet* const asset_sets[] = {
 	&ccTexsAssetSet,
 	&mccTexsAssetSet,
 	&mccMusicAssetSet,
-#ifndef CC_BUILD_CONSOLE
 	&mccSoundAssetSet
-#endif /* TODO: Vorbis decoding */
 };
 
 void Resources_CheckExistence(void) {

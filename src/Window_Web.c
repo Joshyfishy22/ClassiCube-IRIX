@@ -535,15 +535,13 @@ static void ProcessGamepadButtons(EmscriptenGamepadEvent* ev) {
 	Input_SetNonRepeatable(CCPAD_X, GetGamepadButton(2));
 	Input_SetNonRepeatable(CCPAD_Y, GetGamepadButton(3));
 
-	Input_SetNonRepeatable(CCPAD_ZL, GetGamepadButton(4));
-	Input_SetNonRepeatable(CCPAD_ZR, GetGamepadButton(5));
-	Input_SetNonRepeatable(CCPAD_L,  GetGamepadButton(6));
-	Input_SetNonRepeatable(CCPAD_R,  GetGamepadButton(7));
+	Input_SetNonRepeatable(CCPAD_L,  GetGamepadButton(4));
+	Input_SetNonRepeatable(CCPAD_R,  GetGamepadButton(5));
+	Input_SetNonRepeatable(CCPAD_ZL, GetGamepadButton(6));
+	Input_SetNonRepeatable(CCPAD_ZR, GetGamepadButton(7));
 
-	Input_SetNonRepeatable(CCPAD_SELECT, GetGamepadButton( 8));
-	Input_SetNonRepeatable(CCPAD_START,  GetGamepadButton( 9));
-	Input_SetNonRepeatable(CCPAD_LSTICK, GetGamepadButton(10));
-	Input_SetNonRepeatable(CCPAD_RSTICK, GetGamepadButton(11));
+	Input_SetNonRepeatable(CCPAD_SELECT, GetGamepadButton(8));
+	Input_SetNonRepeatable(CCPAD_START,  GetGamepadButton(9));
 	
 	Input_SetNonRepeatable(CCPAD_UP,    GetGamepadButton(12));
 	Input_SetNonRepeatable(CCPAD_DOWN,  GetGamepadButton(13));
@@ -742,10 +740,7 @@ void GLContext_Create(void) {
 	attribs.antialias = false;
 
 	ctx_handle = emscripten_webgl_create_context("#canvas", &attribs);
-	if (!ctx_handle) {
-		Window_ShowDialog("WebGL unsupported", "WebGL is required to run ClassiCube");
-		Process_Exit(0x57474C20);
-	}
+	if (!ctx_handle) Window_ShowDialog("WebGL unsupported", "WebGL is required to run ClassiCube");
 
 	emscripten_webgl_make_context_current(ctx_handle);
 	emscripten_set_webglcontextlost_callback("#canvas", NULL, 0, GLContext_OnLost);

@@ -17,28 +17,15 @@ jobs:
         id: compile
         run: |
           make psp
-          
 
-      # otherwise notify_failure doesn't work
-      - name: Install curl when necessary
-        if: ${{ always() && steps.compile.outcome == 'failure' }}
-        run: apk add curl curl-dev
-        
       - uses: ./.github/actions/notify_failure
         if: ${{ always() && steps.compile.outcome == 'failure' }}
         with:
           NOTIFY_MESSAGE: 'Failed to compile PSP build'
           WEBHOOK_URL: '${{ secrets.WEBHOOK_URL }}'
           
-          
       - uses: ./.github/actions/upload_build
         if: ${{ always() && steps.compile.outcome == 'success' }}
         with:
           SOURCE_FILE: 'EBOOT.PBP'
           DEST_NAME: 'EBOOT.PBP'
-          
-      - uses: ./.github/actions/upload_build
-        if: ${{ always() && steps.compile.outcome == 'success' }}
-        with:
-          SOURCE_FILE: 'ClassiCube-psp.elf'
-          DEST_NAME: 'ClassiCube-psp.elf'

@@ -6,7 +6,6 @@
 #define NOSERVICE
 #define NOMCX
 #define NOIME
-#define NOMINMAX
 #include <windows.h>
 #define SECURITY_WIN32
 #include <sspi.h>
@@ -348,9 +347,6 @@ cc_result SSL_Read(void* ctx_, cc_uint8* data, cc_uint32 count, cc_uint32* read)
 
 				return SSL_ReadDecrypted(ctx, data, count, read);
 			}
-
-			/* TODO properly close the connection with TLS shutdown when this happens */
-			if (sec == SEC_I_CONTEXT_EXPIRED) return SSL_ERR_CONTEXT_DEAD;
 			
 			if (sec != SEC_E_INCOMPLETE_MESSAGE) return sec;
 			/* SEC_E_INCOMPLETE_MESSAGE case - still need to read more data from the server first */
@@ -421,164 +417,263 @@ cc_result SSL_Free(void* ctx_) {
 	Mem_Free(ctx);
 	return 0; 
 }
-#elif defined CC_BUILD_BEARSSL
+#elif defined CC_BUILD_3DS
+#include <3ds.h>
 #include "String.h"
-#include "bearssl.h"
-#include "../misc/certs.h"
-// https://github.com/unkaktus/bearssl/blob/master/samples/client_basic.c#L283
-#define SSL_ERROR_SHIFT 0xB5510000
+#define CERT_ATTRIBUTES
+#include "../misc/RootCerts.h"
 
-typedef struct SSLContext {
-	br_ssl_client_context sc;
-	br_x509_minimal_context xc;
-	unsigned char iobuf[BR_SSL_BUFSIZE_BIDI];
-	br_sslio_context ioc;
-	cc_result readError, writeError;
-	cc_socket socket;
-} SSLContext;
-
+// https://github.com/devkitPro/3ds-examples/blob/master/network/sslc/source/ssl.c
+// https://github.com/devkitPro/libctru/blob/master/libctru/include/3ds/services/sslc.h
+static u32 certChainHandle;
 static cc_bool _verifyCerts;
 
+static void SSL_CreateRootChain(void) {
+	int ret;
+
+	ret = sslcCreateRootCertChain(&certChainHandle);
+	if (ret) { Platform_Log1("sslcCreateRootCertChain failed: %i", &ret); return; }
+		
+	ret = sslcAddTrustedRootCA(certChainHandle, Baltimore_RootCert, Baltimore_RootCert_Size, NULL);
+	if (ret) { Platform_Log1("sslcAddTrustedRootCA failed: %i", &ret); return; }
+}
 
 void SSLBackend_Init(cc_bool verifyCerts) {
-	_verifyCerts = verifyCerts; // TODO support
-}
-
-cc_bool SSLBackend_DescribeError(cc_result res, cc_string* dst) {
-	switch (res) {
-	case SSL_ERROR_SHIFT | BR_ERR_X509_EXPIRED:
-		String_AppendConst(dst, "The website's SSL certificate is expired or not yet valid");
-		return true;
-	case SSL_ERROR_SHIFT | BR_ERR_X509_NOT_TRUSTED:
-		String_AppendConst(dst, "The website's SSL certificate was issued by an authority that is not trusted");
-		return true;
-	}
-	return false; // TODO: error codes 
-}
-
-#if defined CC_BUILD_3DS
-#include <3ds.h>
-static void InjectEntropy(SSLContext* ctx) {
-	char buf[32];
-	PS_GenerateRandomBytes(buf, 32);
-	// NOTE: PS_GenerateRandomBytes isn't implemented in Citra
+	int ret = sslcInit(0);
+	if (ret) { Platform_Log1("sslcInit failed: %i", &ret); return; }
 	
-	br_ssl_engine_inject_entropy(&ctx->sc.eng, buf, 32);
+	_verifyCerts = verifyCerts;
+	SSL_CreateRootChain();
 }
-#else
-#warning "Using uninitialised stack data for entropy. This should be replaced with actual cryptographic RNG data"
-static void InjectEntropy(SSLContext* ctx) {
-	char buf[32];
-	// TODO: Use actual APIs to retrieve random data
-	
-	br_ssl_engine_inject_entropy(&ctx->sc.eng, buf, 32);
-}
-#endif
-
-static void SetCurrentTime(SSLContext* ctx) {
-	cc_uint64 cur = DateTime_CurrentUTC_MS() / 1000;
-	uint32_t days = (uint32_t)(cur / 86400) + 366;
-	uint32_t secs = (uint32_t)(cur % 86400);
-		
-	br_x509_minimal_set_time(&ctx->xc, days, secs);
-	/* This matches bearssl's default time calculation
-		time_t x = time(NULL);
-		vd = (uint32_t)(x / 86400) + 719528;
-		vs = (uint32_t)(x % 86400);
-	 */
-}
-
-static int sock_read(void* ctx_, unsigned char* buf, size_t len) {
-	SSLContext* ctx = (SSLContext*)ctx_;
-	cc_uint32 read;
-	cc_result res = Socket_Read(ctx->socket, buf, len, &read);
-	
-	if (res) { ctx->readError = res; return -1; }
-	return read;
-}
-
-static int sock_write(void* ctx_, const unsigned char* buf, size_t len) {
-	SSLContext* ctx = (SSLContext*)ctx_;
-	cc_uint32 wrote;
-	cc_result res = Socket_Write(ctx->socket, buf, len, &wrote);
-	
-	if (res) { ctx->writeError = res; return -1; }
-	return wrote;
-}
+cc_bool SSLBackend_DescribeError(cc_result res, cc_string* dst) { return false; }
 
 cc_result SSL_Init(cc_socket socket, const cc_string* host_, void** out_ctx) {
-	SSLContext* ctx;
+	if (!certChainHandle) return HTTP_ERR_NO_SSL;
+	int ret;
+	
+	sslcContext* ctx;
 	char host[NATIVE_STR_LEN];
 	String_EncodeUtf8(host, host_);
 	
-	ctx = Mem_TryAlloc(1, sizeof(SSLContext));
+	ctx = Mem_TryAllocCleared(1, sizeof(sslcContext));
 	if (!ctx) return ERR_OUT_OF_MEMORY;
 	*out_ctx = (void*)ctx;
 	
-	br_ssl_client_init_full(&ctx->sc, &ctx->xc, TAs, TAs_NUM);
-	/*if (!_verify_certs) {
-		br_x509_minimal_set_rsa(&ctx->xc,   &br_rsa_i31_pkcs1_vrfy);
-		br_x509_minimal_set_ecdsa(&ctx->xc, &br_ec_prime_i31, &br_ecdsa_i31_vrfy_asn1);
-	}*/
-	InjectEntropy(ctx);
-	SetCurrentTime(ctx);
-	ctx->socket = socket;
-
-	br_ssl_engine_set_buffer(&ctx->sc.eng, ctx->iobuf, sizeof(ctx->iobuf), 1);
-	br_ssl_client_reset(&ctx->sc, host, 0);
+	int opts = _verifyCerts ? SSLCOPT_Default : SSLCOPT_DisableVerify;
+	if ((ret = sslcCreateContext(ctx, socket, opts, host))) return ret;
+	Platform_LogConst("--ssl context create--");
+	sslcContextSetRootCertChain(ctx, certChainHandle);
+	Platform_LogConst("--ssl root chain added--");
 	
-	br_sslio_init(&ctx->ioc, &ctx->sc.eng, 
-			sock_read,  ctx, 
-			sock_write, ctx);
-			
-	ctx->readError  = 0;
-	ctx->writeError = 0;
-	
+	// detect lack of proper SSL support in Citra
+	if (!ctx->sslchandle) return HTTP_ERR_NO_SSL;
+	if ((ret = sslcStartConnection(ctx, NULL, NULL))) return ret;
+	Platform_LogConst("--ssl connection started--");
 	return 0;
 }
 
 cc_result SSL_Read(void* ctx_, cc_uint8* data, cc_uint32 count, cc_uint32* read) { 
-	SSLContext* ctx = (SSLContext*)ctx_;
-	// TODO: just br_sslio_write ??
-	int res = br_sslio_read(&ctx->ioc, data, count);
-	int err;
+	Platform_Log1("<< IN: %i", &count); 
+	sslcContext* ctx = (sslcContext*)ctx_;
+	int ret = sslcRead(ctx, data, count, false);
 	
-	if (res < 0) {
-		if (ctx->readError) return ctx->readError;
-		
-		// TODO session resumption, proper connection closing ??
-		err = br_ssl_engine_last_error(&ctx->sc.eng);
-		if (err == 0 && br_ssl_engine_current_state(&ctx->sc.eng) == BR_SSL_CLOSED)
-			return SSL_ERR_CONTEXT_DEAD;
-		return SSL_ERROR_SHIFT + err;
-	}
-	
-	br_sslio_flush(&ctx->ioc);
-	*read = res;
-	return 0;
+	Platform_Log1("--ssl read-- = %i", &ret);
+	if (ret < 0) return ret;
+	*read = ret; return 0;
 }
 
 cc_result SSL_Write(void* ctx_, const cc_uint8* data, cc_uint32 count, cc_uint32* wrote) {
-	SSLContext* ctx = (SSLContext*)ctx_;
-	// TODO: just br_sslio_write ??
-	int res = br_sslio_write_all(&ctx->ioc, data, count);
+	Platform_Log1(">> OUT: %i", &count); 
+	sslcContext* ctx = (sslcContext*)ctx_;
+	int ret = sslcWrite(ctx, data, count);
 	
-	if (res < 0) {
-		if (ctx->writeError) return ctx->writeError;
-		return SSL_ERROR_SHIFT + br_ssl_engine_last_error(&ctx->sc.eng);
-	}
+	Platform_Log1("--ssl write-- = %i", &ret);
+	if (ret < 0) return ret;
+	*wrote = ret; return 0;
+}
+
+cc_result SSL_Free(void* ctx_) { 
+	sslcContext* ctx = (sslcContext*)ctx_;
+	return sslcDestroyContext(ctx);
+}
+#elif defined CC_BUILD_GCWII && defined HW_RVL
+/* Based off https://wiibrew.org/wiki//dev/net/ssl/code */
+#include <gccore.h>
+#include "SSL.h"
+#include "Platform.h"
+#include "Logger.h"
+#include "String.h"
+
+#define IOCTLV_SSL_NEW 1
+#define IOCTLV_SSL_CONNECT 2
+#define IOCTLV_SSL_HANDSHAKE 3
+#define IOCTLV_SSL_READ 4
+#define IOCTLV_SSL_WRITE 5
+#define IOCTLV_SSL_SHUTDOWN 6
+#define SSL_HEAP_SIZE 0xB000
+
+#define CERT_ATTRIBUTES ATTRIBUTE_ALIGN(32)
+//#include "../misc/RootCerts.h"
+
+static char SSL_fs[] ATTRIBUTE_ALIGN(32) = "/dev/net/ssl";
+static s32 SSL_fd  = -1;
+static s32 SSL_hid = -1;
+void SSLBackend_Init(cc_bool verifyCerts) {
+	if (SSL_hid >= 0) return;
 	
-	br_sslio_flush(&ctx->ioc);
-	*wrote = res;
+	SSL_hid = iosCreateHeap(SSL_HEAP_SIZE);
+	if (SSL_hid < 0) Logger_Abort("Failed to create SSL heap");
+}
+cc_bool SSLBackend_DescribeError(cc_result res, cc_string* dst) { return false; }
+
+static u32 ssl_open(void) {
+	s32 ret;
+	if (SSL_fd >= 0) return 0;
+	if (SSL_hid < 0) return ERR_OUT_OF_MEMORY;
+	
+	ret = IOS_Open(SSL_fs, 0);
+	if (ret < 0) return ret;
+	SSL_fd = ret;
 	return 0;
 }
 
-cc_result SSL_Free(void* ctx_) {
-	SSLContext* ctx = (SSLContext*)ctx_;
-	if (ctx) br_sslio_close(&ctx->ioc);
+static u32 ssl_close(void) {
+	s32 ret;
+	if (SSL_fd < 0) return 0;
 	
-	Mem_Free(ctx_);
+	ret = IOS_Close(SSL_fd);
+	SSL_fd = -1;
+	return ret;
+}
+
+static s32 ssl_new(const cc_string* host, u32 ssl_verify_options) {
+	static cc_string ccnet_cert_CN = String_FromConst("sni.cloudflaressl.com");
+	s32 ret;
+	
+	u8 aCN[1024] ATTRIBUTE_ALIGN(32);
+	s32 aContext[8] ATTRIBUTE_ALIGN(32);
+	u32 aVerify_options[8] ATTRIBUTE_ALIGN(32);
+	
+	// classicube.net's SSL certificate CN is actually "sni.cloudflaressl.com"
+	if (String_CaselessEqualsConst(host, "www.classicube.net")) {
+		String_EncodeUtf8(aCN, &ccnet_cert_CN);
+	} else {
+		String_EncodeUtf8(aCN, host);
+	}
+	
+	if ((ret = ssl_open())) return ret;
+	
+	aVerify_options[0] = ssl_verify_options;
+	ret = IOS_IoctlvFormat(SSL_hid, SSL_fd, IOCTLV_SSL_NEW, "d:dd", aContext, 0x20, aVerify_options, 0x20, aCN, 0x100);
+	ssl_close();
+	
+	return ret ? ret : aContext[0];
+}
+
+static s32 ssl_connect(s32 ssl_context, s32 socket) {
+	s32 ret;
+	s32 aSsl_context[8] ATTRIBUTE_ALIGN(32);
+	s32 aSocket[8] ATTRIBUTE_ALIGN(32);
+	s32 aResponse[8] ATTRIBUTE_ALIGN(32);
+	
+	if ((ret = ssl_open())) return ret;
+	
+	aSsl_context[0] = ssl_context;
+	aSocket[0]      = socket;
+	ret = IOS_IoctlvFormat(SSL_hid, SSL_fd, IOCTLV_SSL_CONNECT, "d:dd", aResponse, 0x20, aSsl_context, 0x20, aSocket, 0x20);	
+	ssl_close();
+	
+	return ret ? ret : aResponse[0];
+}
+
+static s32 ssl_handshake(s32 ssl_context) {
+	s32 ret;
+	s32 aSsl_context[8] ATTRIBUTE_ALIGN(32);
+	s32 aResponse[8] ATTRIBUTE_ALIGN(32);
+	
+	if ((ret = ssl_open())) return ret;
+	
+	aSsl_context[0] = ssl_context;
+	ret = IOS_IoctlvFormat(SSL_hid, SSL_fd, IOCTLV_SSL_HANDSHAKE, "d:d", aResponse, 0x20, aSsl_context, 0x20);	
+	ssl_close();
+	
+	return ret ? ret : aResponse[0];
+}
+
+cc_result SSL_Init(cc_socket socket, const cc_string* host, void** ctx) {
+	int sslCtx, ret;
+	
+	sslCtx = ssl_new(host, 0);
+	if (sslCtx < 0) return sslCtx;
+	
+	int* mem = Mem_Alloc(1, sizeof(int), "SSL context");
+	*mem     = sslCtx;
+	*ctx     = mem;
+	
+	if ((ret = ssl_connect(sslCtx, socket))) return ret;
+	if ((ret = ssl_handshake(sslCtx)))       return ret;
 	return 0;
+}
+
+cc_result SSL_Read(void* ctx, cc_uint8* data, cc_uint32 count, cc_uint32* read) {
+	int sslCtx = *(int*)ctx;
+	*read = 0;
+	s32 ret;
+	
+	s32 aSsl_context[8] ATTRIBUTE_ALIGN(32);
+	s32 aResponse[8] ATTRIBUTE_ALIGN(32);
+	if ((ret = ssl_open())) return ret;
+	
+	u8* aBuffer = NULL;
+	aBuffer = iosAlloc(SSL_hid, count);
+	if (!aBuffer) return IPC_ENOMEM;
+	aSsl_context[0] = sslCtx;
+	ret = IOS_IoctlvFormat(SSL_hid, SSL_fd, IOCTLV_SSL_READ, "dd:d", aResponse, 0x20, aBuffer, count, aSsl_context, 0x20);
+	ssl_close();
+	
+	if (ret == IPC_OK) {
+		Mem_Copy(data, aBuffer, aResponse[0]);
+	}
+	*read = aResponse[0];
+	iosFree(SSL_hid, aBuffer);
+	return ret;
+}
+
+cc_result SSL_Write(void* ctx, const cc_uint8* data, cc_uint32 count, cc_uint32* wrote) {
+	int sslCtx = *(int*)ctx;
+	*wrote = 0;
+	s32 ret;
+	
+	s32 aSsl_context[8] ATTRIBUTE_ALIGN(32);
+	s32 aResponse[8] ATTRIBUTE_ALIGN(32);
+	if ((ret = ssl_open())) return ret;
+	
+	u8* aBuffer = NULL;
+	aBuffer = iosAlloc(SSL_hid, count);
+	if (!aBuffer) return IPC_ENOMEM;
+	aSsl_context[0] = sslCtx;
+	Mem_Copy(aBuffer, data, count);
+	ret = IOS_IoctlvFormat(SSL_hid, SSL_fd, IOCTLV_SSL_WRITE, "d:dd", aResponse, 0x20, aSsl_context, 0x20, aBuffer, count);
+	ssl_close();
+	
+	*wrote = aResponse[0];
+	iosFree(SSL_hid, aBuffer);
+	return ret;
+}
+
+cc_result SSL_Free(void* ctx) {
+	int sslCtx = *(int*)ctx;
+	s32 ret;
+	
+	s32 aSsl_context[8] ATTRIBUTE_ALIGN(32);
+	s32 aResponse[8] ATTRIBUTE_ALIGN(32);	
+	if ((ret = ssl_open())) return ret;
+	
+	aSsl_context[0] = sslCtx;
+	ret = IOS_IoctlvFormat(SSL_hid, SSL_fd, IOCTLV_SSL_SHUTDOWN, "d:d", aResponse, 0x20, aSsl_context, 0x20);
+	ssl_close();
+	
+	return ret;
 }
 #else
 void SSLBackend_Init(cc_bool verifyCerts) { }

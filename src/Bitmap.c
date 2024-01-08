@@ -81,13 +81,10 @@ enum PngFilter {
 typedef void (*Png_RowExpander)(int width, BitmapCol* palette, cc_uint8* src, BitmapCol* dst);
 static const cc_uint8 pngSig[PNG_SIG_SIZE] = { 137, 80, 78, 71, 13, 10, 26, 10 };
 
-/* 5.2 PNG signature */
 cc_bool Png_Detect(const cc_uint8* data, cc_uint32 len) {
 	return len >= PNG_SIG_SIZE && Mem_Equal(data, pngSig, PNG_SIG_SIZE);
 }
 
-/* 9 Filtering */
-/* 13.9 Filtering */
 static void Png_Reconstruct(cc_uint8 type, cc_uint8 bytesPerPixel, cc_uint8* line, cc_uint8* prior, cc_uint32 lineLen) {
 	cc_uint32 i, j;
 	switch (type) {
@@ -137,7 +134,6 @@ static void Png_Reconstruct(cc_uint8 type, cc_uint8 bytesPerPixel, cc_uint8* lin
 
 #define Bitmap_Set(dst, r,g,b,a) dst = BitmapCol_Make(r, g, b, a);
 
-/* 7.2 Scanlines */
 #define PNG_Do_Grayscale(dstI, src, scale)  rgb = (src) * scale; Bitmap_Set(dst[dstI], rgb, rgb, rgb, 255);
 #define PNG_Do_Grayscale_8(dstI, srcI)      rgb = src[srcI];     Bitmap_Set(dst[dstI], rgb, rgb, rgb, 255);
 #define PNG_Do_Grayscale_A__8(dstI, srcI)   rgb = src[srcI];     Bitmap_Set(dst[dstI], rgb, rgb, rgb, src[srcI + 1]);
@@ -341,7 +337,7 @@ cc_result Png_Decode(struct Bitmap* bmp, struct Stream* stream) {
 	cc_result res;
 
 	/* header variables */
-	static const cc_uint32 samplesPerPixel[7] = { 1, 0, 3, 1, 2, 0, 4 };
+	static cc_uint32 samplesPerPixel[7] = { 1, 0, 3, 1, 2, 0, 4 };
 	cc_uint8 col, bitsPerSample, bytesPerPixel;
 	Png_RowExpander rowExpander;
 	cc_uint32 scanlineSize, scanlineBytes;
@@ -384,7 +380,6 @@ cc_result Png_Decode(struct Bitmap* bmp, struct Stream* stream) {
 		fourCC   = Stream_GetU32_BE(tmp + 4);
 
 		switch (fourCC) {
-		/* 11.2.2 IHDR Image header */
 		case PNG_FourCC('I','H','D','R'): {
 			if (dataSize != PNG_IHDR_SIZE) return PNG_ERR_INVALID_HDR_SIZE;
 			res = Stream_Read(stream, tmp, PNG_IHDR_SIZE);
@@ -400,7 +395,7 @@ cc_result Png_Decode(struct Bitmap* bmp, struct Stream* stream) {
 
 			bitsPerSample = tmp[8]; col = tmp[9];
 			rowExpander = Png_GetExpander(col, bitsPerSample);
-			if (!rowExpander) return PNG_ERR_INVALID_COL_BPP;
+			if (rowExpander == NULL) return PNG_ERR_INVALID_COL_BPP;
 
 			if (tmp[10] != 0) return PNG_ERR_COMP_METHOD;
 			if (tmp[11] != 0) return PNG_ERR_FILTER;
@@ -411,7 +406,6 @@ cc_result Png_Decode(struct Bitmap* bmp, struct Stream* stream) {
 			scanlineBytes = scanlineSize + 1; /* Add 1 byte for filter byte of each scanline */
 		} break;
 
-		/* 11.2.3 PLTE Palette */
 		case PNG_FourCC('P','L','T','E'): {
 			if (dataSize > PNG_PALETTE * 3) return PNG_ERR_PAL_SIZE;
 			if ((dataSize % 3) != 0)        return PNG_ERR_PAL_SIZE;
@@ -427,7 +421,6 @@ cc_result Png_Decode(struct Bitmap* bmp, struct Stream* stream) {
 			}
 		} break;
 
-		/* 11.3.2.1 tRNS Transparency */
 		case PNG_FourCC('t','R','N','S'): {
 			if (col == PNG_COLOR_GRAYSCALE) {
 				if (dataSize != 2) return PNG_ERR_TRANS_COUNT;
@@ -463,7 +456,6 @@ cc_result Png_Decode(struct Bitmap* bmp, struct Stream* stream) {
 			}
 		} break;
 
-		/* 11.2.4 IDAT Image data */
 		case PNG_FourCC('I','D','A','T'): {
 			Stream_ReadonlyPortion(&datStream, stream, dataSize);
 			inflate.Source = &datStream;
@@ -527,7 +519,6 @@ cc_result Png_Decode(struct Bitmap* bmp, struct Stream* stream) {
 			}
 		} break;
 
-		/* 11.2.5 IEND Image trailer */
 		case PNG_FourCC('I','E','N','D'):
 			/* Reading all image data should be handled by above if in the IDAT chunk */
 			/* If we reached here, it means not all of the image data was read */
@@ -614,8 +605,7 @@ static void Png_MakeRow(const BitmapCol* src, cc_uint8* dst, int lineLen, cc_boo
 
 static void Png_EncodeRow(const cc_uint8* cur, const cc_uint8* prior, cc_uint8* best, int lineLen, cc_bool alpha) {
 	cc_uint8* dst;
-	int bestFilter   = PNG_FILTER_SUB;
-	int bestEstimate = Int32_MaxValue;
+	int bestFilter, bestEstimate = Int32_MaxValue;
 	int x, filter, estimate;
 
 	dst = best + 1;

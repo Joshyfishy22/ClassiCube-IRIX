@@ -35,8 +35,6 @@ void Directory_GetCachePath(cc_string* path) { }
 /*########################################################################################################################*
 *-----------------------------------------------------Process/Module------------------------------------------------------*
 *#########################################################################################################################*/
-cc_bool Process_OpenSupported = false;
-
 static char gameArgs[GAME_MAX_CMDARGS][STRING_SIZE];
 static int gameNumArgs;
 static cc_bool gameHasArgs;
@@ -89,10 +87,6 @@ cc_result Platform_SetDefaultCurrentDirectory(int argc, char **argv) {
 }
 
 void Process_Exit(cc_result code) { exit(code); }
-
-cc_result Process_StartOpen(const cc_string* args) {
-	return ERR_NOT_SUPPORTED;
-}
 
 
 /*########################################################################################################################*

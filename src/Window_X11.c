@@ -400,27 +400,25 @@ int Window_GetWindowState(void) {
 	cc_bool fullscreen = false, minimised = false;
 	Atom prop_type;
 	unsigned long items, after;
-	unsigned char* data = NULL;
 	int i, prop_format;
-	Atom* list;
+	Atom* data = NULL;
 
 	XGetWindowProperty(win_display, win_handle,
 		net_wm_state, 0, 256, false, xa_atom, &prop_type,
 		&prop_format, &items, &after, &data);
 
-	if (!data) return WINDOW_STATE_NORMAL;
-	list = (Atom*)data;
-		
-	for (i = 0; i < items; i++) {
-		Atom atom = list[i];
+	if (data) {
+		for (i = 0; i < items; i++) {
+			Atom atom = data[i];
 
-		if (atom == net_wm_state_minimized) {
-			minimised  = true;
-		} else if (atom == net_wm_state_fullscreen) {
-			fullscreen = true;
+			if (atom == net_wm_state_minimized) {
+				minimised  = true;
+			} else if (atom == net_wm_state_fullscreen) {
+				fullscreen = true;
+			}
 		}
+		XFree(data);
 	}
-	XFree(data);
 
 	if (fullscreen) return WINDOW_STATE_FULLSCREEN;
 	if (minimised)  return WINDOW_STATE_MINIMISED;
@@ -645,7 +643,7 @@ void Window_ProcessEvents(double delta) {
 
 		case MappingNotify:
 			if (e.xmapping.request == MappingModifier || e.xmapping.request == MappingKeyboard) {
-				Platform_LogConst("keyboard mapping refreshed");
+				Platform_LogConst("keybard mapping refreshed");
 				XRefreshKeyboardMapping(&e.xmapping);
 			}
 			break;
@@ -1133,10 +1131,10 @@ static void BlitFramebuffer(int x1, int y1, int width, int height) {
 
 void Window_DrawFramebuffer(Rect2D r) {
 	/* Convert 32 bit depth to window depth when required */
-	if (!fb_fast) BlitFramebuffer(r.x, r.y, r.Width, r.Height);
+	if (!fb_fast) BlitFramebuffer(r.X, r.Y, r.Width, r.Height);
 
 	XPutImage(win_display, win_handle, fb_gc, fb_image,
-		r.x, r.y, r.x, r.y, r.Width, r.Height);
+		r.X, r.Y, r.X, r.Y, r.Width, r.Height);
 }
 
 void Window_FreeFramebuffer(struct Bitmap* bmp) {

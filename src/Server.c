@@ -133,10 +133,8 @@ static void SPConnection_BeginConnect(void) {
 	World_SetDimensions(128, 64, 128);
 #endif
 
-	Gen_Active = &NotchyGen;
-	Gen_Seed   = Random_Next(&rnd, Int32_MaxValue);
-	Gen_Start();
-
+	Gen_Vanilla = true;
+	Gen_Seed    = Random_Next(&rnd, Int32_MaxValue);
 	GeneratingScreen_Show();
 }
 
@@ -214,7 +212,7 @@ static void SPConnection_Init(void) {
 /*########################################################################################################################*
 *--------------------------------------------------Multiplayer connection-------------------------------------------------*
 *#########################################################################################################################*/
-static cc_socket net_socket = -1;
+static cc_socket net_socket;
 static cc_uint8  net_readBuffer[4096 * 5];
 static cc_uint8* net_readCurrent;
 
@@ -277,10 +275,7 @@ static void MPConnection_TickConnect(void) {
 }
 
 static void MPConnection_BeginConnect(void) {
-	static const cc_string invalid_reason = String_FromConst("Invalid IP address");
 	cc_string title; char titleBuffer[STRING_SIZE];
-	cc_sockaddr addrs[SOCKET_MAX_ADDRS];
-	int numValidAddrs;
 	cc_result res;
 	String_InitArray(title, titleBuffer);
 
@@ -292,16 +287,10 @@ static void MPConnection_BeginConnect(void) {
 	Blocks.CanPlace[BLOCK_STILL_WATER] = false; Blocks.CanDelete[BLOCK_STILL_WATER] = false;
 	Blocks.CanPlace[BLOCK_BEDROCK] = false;     Blocks.CanDelete[BLOCK_BEDROCK] = false;
 	
-	res = Socket_ParseAddress(&Server.Address, Server.Port, addrs, &numValidAddrs);
+	res = Socket_Connect(&net_socket, &Server.Address, Server.Port, true);
 	if (res == ERR_INVALID_ARGUMENT) {
-		MPConnection_Fail(&invalid_reason); return;
-	} else if (res) {
-		MPConnection_FailConnect(res); return;
-	}
-
-	res = Socket_Connect(&net_socket, &addrs[0], true);
-	if (res == ERR_INVALID_ARGUMENT) {
-		MPConnection_Fail(&invalid_reason);
+		static const cc_string reason = String_FromConst("Invalid IP address");
+		MPConnection_Fail(&reason);
 	} else if (res && res != ReturnCode_SocketInProgess && res != ReturnCode_SocketWouldBlock) {
 		MPConnection_FailConnect(res);
 	} else {
@@ -360,9 +349,8 @@ static void DisconnectInvalidOpcode(cc_uint8 opcode) {
 }
 
 static void MPConnection_Tick(struct ScheduledTask* task) {
-	Net_Handler handler;
 	cc_uint8* readEnd;
-	cc_uint8* readCur;
+	Net_Handler handler;
 	cc_uint32 read;
 	int i, remaining;
 	cc_result res;
@@ -385,37 +373,36 @@ static void MPConnection_Tick(struct ScheduledTask* task) {
 		/* TODO: Should this be checked unconditonally instead of just when read = 0 ? */
 		if (net_lastPacket + 30 < Game.Time) { MPConnection_Disconnect(); return; }
 	} else {
-		readCur        = net_readBuffer;
-		readEnd        = net_readCurrent + read;
-		net_lastPacket = Game.Time;
+		readEnd         = net_readCurrent + read;
+		net_lastPacket  = Game.Time;
+		net_readCurrent = net_readBuffer;
 
-		while (readCur < readEnd) {
-			cc_uint8 opcode = readCur[0];
+		while (net_readCurrent < readEnd) {
+			cc_uint8 opcode = net_readCurrent[0];
 
 			/* Workaround for older D3 servers which wrote one byte too many for HackControl packets */
 			if (cpe_needD3Fix && lastOpcode == OPCODE_HACK_CONTROL && (opcode == 0x00 || opcode == 0xFF)) {
 				Platform_LogConst("Skipping invalid HackControl byte from D3 server");
-				readCur++;
+				net_readCurrent++;
 				LocalPlayer_ResetJumpVelocity();
 				continue;
 			}
 
-			if (readCur + Protocol.Sizes[opcode] > readEnd) break;
+			if (net_readCurrent + Protocol.Sizes[opcode] > readEnd) break;
 			handler = Protocol.Handlers[opcode];
 			if (!handler) { DisconnectInvalidOpcode(opcode); return; }
 
 			lastOpcode = opcode;
-			handler(readCur + 1); /* skip opcode */
-			readCur += Protocol.Sizes[opcode];
+			handler(net_readCurrent + 1); /* skip opcode */
+			net_readCurrent += Protocol.Sizes[opcode];
 		}
 
 		/* Protocol packets might be split up across TCP packets */
 		/* If so, copy last few unprocessed bytes back to beginning of buffer */
 		/* These bytes are then later combined with subsequently read TCP packet data */
-		remaining = (int)(readEnd - readCur);
-		for (i = 0; i < remaining; i++) 
-		{
-			net_readBuffer[i] = readCur[i];
+		remaining = (int)(readEnd - net_readCurrent);
+		for (i = 0; i < remaining; i++) {
+			net_readBuffer[i] = net_readCurrent[i];
 		}
 		net_readCurrent = net_readBuffer + remaining;
 	}

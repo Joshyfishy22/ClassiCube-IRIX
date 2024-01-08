@@ -26,7 +26,7 @@ ifeq ($(PLAT),web)
 CC=emcc
 OEXT=.html
 CFLAGS=-g
-LDFLAGS=-s WASM=1 -s NO_EXIT_RUNTIME=1 -s ALLOW_MEMORY_GROWTH=1 --js-library src/interop_web.js
+LDFLAGS=-s WASM=1 -s NO_EXIT_RUNTIME=1 -s ALLOW_MEMORY_GROWTH=1
 endif
 
 ifeq ($(PLAT),mingw)
@@ -38,12 +38,12 @@ LIBS=-mwindows -lwinmm -limagehlp
 endif
 
 ifeq ($(PLAT),linux)
-LIBS=-lX11 -lXi -lpthread -lGL -ldl
+LIBS=-lX11 -lXi -lpthread -lGL -lm -ldl
 endif
 
 ifeq ($(PLAT),sunos)
 CFLAGS=-g -pipe -fno-math-errno
-LIBS=-lsocket -lX11 -lXi -lGL
+LIBS=-lm -lsocket -lX11 -lXi -lGL
 endif
 
 ifeq ($(PLAT),mac_x32)
@@ -62,13 +62,13 @@ endif
 ifeq ($(PLAT),freebsd)
 CFLAGS=-g -pipe -I /usr/local/include -fno-math-errno
 LDFLAGS=-L /usr/local/lib -rdynamic
-LIBS=-lexecinfo -lGL -lX11 -lXi -lpthread
+LIBS=-lexecinfo -lGL -lX11 -lXi -lm -lpthread
 endif
 
 ifeq ($(PLAT),openbsd)
 CFLAGS=-g -pipe -I /usr/X11R6/include -I /usr/local/include -fno-math-errno
 LDFLAGS=-L /usr/X11R6/lib -L /usr/local/lib -rdynamic
-LIBS=-lexecinfo -lGL -lX11 -lXi -lpthread
+LIBS=-lexecinfo -lGL -lX11 -lXi -lm -lpthread
 endif
 
 ifeq ($(PLAT),netbsd)
@@ -80,14 +80,14 @@ endif
 ifeq ($(PLAT),dragonfly)
 CFLAGS=-g -pipe -I /usr/local/include -fno-math-errno
 LDFLAGS=-L /usr/local/lib -rdynamic
-LIBS=-lexecinfo -lGL -lX11 -lXi -lpthread
+LIBS=-lexecinfo -lGL -lX11 -lXi -lm -lpthread
 endif
 
 ifeq ($(PLAT),haiku)
 OBJECTS+=src/interop_BeOS.o
 CFLAGS=-g -pipe -fno-math-errno
 LDFLAGS=-g
-LIBS=-lGL -lnetwork -lstdc++ -lbe -lgame -ltracker
+LIBS=-lm -lGL -lnetwork -lstdc++ -lbe -lgame -ltracker
 endif
 
 ifeq ($(PLAT),beos)
@@ -103,7 +103,15 @@ endif
 
 ifeq ($(PLAT),irix)
 CC=gcc
-LIBS=-lGL -lX11 -lXi -lpthread -ldl
+LIBS=-lGL -lX11 -lXi -lm -lpthread -ldl 
+LDFLAGS=-Wl,-rpath-link=/usr/lib32 -Wl,-rpath=/usr/lib32:/usr/sgug/lib32
+endif
+
+ifeq ($(PLAT),irix64)
+CC=c99
+CFLAGS=-O2 -n32 -mips3 -DCC_BUILD_GL11 -DCC_BUILD_NOSOUNDS -DCC_BUILD_NOMUSIC  
+LIBS=-lGL -lX11 -lXi -lm -lpthread -ldl 
+LDFLAGS=-mips3
 endif
 
 ifeq ($(OS),Windows_NT)
@@ -146,27 +154,23 @@ irix:
 # consoles builds require special handling, so are moved to
 #  separate makefiles to avoid having one giant messy makefile
 psp:
-	$(MAKE) -f misc/psp/Makefile PLAT=psp
+	$(MAKE) -f src/Makefile_PSP PLAT=psp
 vita:
-	$(MAKE) -f misc/vita/Makefile PLAT=vita
+	$(MAKE) -f src/Makefile_vita PLAT=vita
 ps3:
-	$(MAKE) -f misc/ps3/Makefile PLAT=ps3
-ps2:
-	$(MAKE) -f misc/ps2/Makefile PLAT=ps2
+	$(MAKE) -f src/Makefile_PS3 PLAT=ps3
 3ds:
-	$(MAKE) -f misc/3ds/Makefile PLAT=3ds
+	$(MAKE) -f src/Makefile_3DS PLAT=3ds
 wii:
-	$(MAKE) -f misc/wii/Makefile PLAT=wii
+	$(MAKE) -f src/Makefile_wii PLAT=wii
 gamecube:
-	$(MAKE) -f misc/gc/Makefile PLAT=gamecube
+	$(MAKE) -f src/Makefile_gamecube PLAT=gamecube
 dreamcast:
-	$(MAKE) -f misc/dreamcast/Makefile PLAT=dreamcast
+	$(MAKE) -f src/Makefile_dreamcast PLAT=dreamcast
 xbox:
-	$(MAKE) -f misc/xbox/Makefile PLAT=xbox
+	$(MAKE) -f src/Makefile_xbox PLAT=xbox
 xbox360:
-	$(MAKE) -f misc/xbox360/Makefile PLAT=xbox360
-n64:
-	$(MAKE) -f misc/n64/Makefile PLAT=n64
+	$(MAKE) -f src/Makefile_xbox PLAT=xbox360
 	
 clean:
 	$(DEL) $(OBJECTS)

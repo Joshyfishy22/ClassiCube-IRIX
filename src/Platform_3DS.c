@@ -285,58 +285,58 @@ void Waitable_WaitFor(void* handle, cc_uint32 milliseconds) {
 /*########################################################################################################################*
 *---------------------------------------------------------Socket----------------------------------------------------------*
 *#########################################################################################################################*/
-cc_result Socket_ParseAddress(const cc_string* address, int port, cc_sockaddr* addrs, int* numValidAddrs) {
-	char str[NATIVE_STR_LEN];
-	char portRaw[32]; cc_string portStr;
+union SocketAddress {
+	struct sockaddr raw;
+	struct sockaddr_in v4;
+};
+
+static int ParseHost(union SocketAddress* addr, const char* host) {
 	struct addrinfo hints = { 0 };
 	struct addrinfo* result;
 	struct addrinfo* cur;
-	int i = 0;
-	
-	String_EncodeUtf8(str, address);
-	*numValidAddrs = 0;
-	struct sockaddr_in* addr4 = (struct sockaddr_in*)addrs[0].data;
-	if (inet_aton(str, &addr4->sin_addr) > 0) {
-		// TODO eliminate this path?
-		addr4->sin_family = AF_INET;
-		addr4->sin_port   = htons(port);
-		
-		addrs[0].size  = sizeof(*addr4);
-		*numValidAddrs = 1;
-		return 0;
-	}
+	int found = false;
 
-	hints.ai_family   = AF_INET; // TODO: you need this, otherwise resolving dl.dropboxusercontent.com crashes in Citra. probably something to do with IPv6 addresses
+	hints.ai_family   = AF_INET;
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_protocol = IPPROTO_TCP;
-	
-	String_InitArray(portStr,  portRaw);
-	String_AppendInt(&portStr, port);
-	portRaw[portStr.length] = '\0';
 
-	int res = getaddrinfo(str, portRaw, &hints, &result);
+	int res = getaddrinfo(host, NULL, &hints, &result);
 	if (res == -NO_DATA) return SOCK_ERR_UNKNOWN_HOST;
 	if (res) return res;
 
-	for (cur = result; cur && i < SOCKET_MAX_ADDRS; cur = cur->ai_next, i++) 
-	{
-		if (!cur->ai_addrlen) break; 
-		// TODO citra returns empty addresses past first one? does that happen on real hardware too?
-		
-		Mem_Copy(addrs[i].data, cur->ai_addr, cur->ai_addrlen);
-		addrs[i].size = cur->ai_addrlen;
+	for (cur = result; cur; cur = cur->ai_next) {
+		if (cur->ai_family != AF_INET) continue;
+		found = true;
+
+		Mem_Copy(addr, cur->ai_addr, cur->ai_addrlen);
+		break;
 	}
 
 	freeaddrinfo(result);
-	*numValidAddrs = i;
-	return i == 0 ? ERR_INVALID_ARGUMENT : 0;
+	return found ? 0 : ERR_INVALID_ARGUMENT;
 }
 
-cc_result Socket_Connect(cc_socket* s, cc_sockaddr* addr, cc_bool nonblocking) {
-	struct sockaddr* raw = (struct sockaddr*)addr->data;
+static int ParseAddress(union SocketAddress* addr, const cc_string* address) {
+	char str[NATIVE_STR_LEN];
+	String_EncodeUtf8(str, address);
+
+	if (inet_pton(AF_INET, str, &addr->v4.sin_addr) > 0) return 0;
+	return ParseHost(addr, str);
+}
+
+int Socket_ValidAddress(const cc_string* address) {
+	union SocketAddress addr;
+	return ParseAddress(&addr, address) == 0;
+}
+
+cc_result Socket_Connect(cc_socket* s, const cc_string* address, int port, cc_bool nonblocking) {
+	union SocketAddress addr;
 	int res;
 
-	*s = socket(raw->sa_family, SOCK_STREAM, 0); // https://www.3dbrew.org/wiki/SOCU:socket
+	*s = -1;
+	if ((res = ParseAddress(&addr, address))) return res;
+
+	*s = socket(AF_INET, SOCK_STREAM, 0); // https://www.3dbrew.org/wiki/SOCU:socket
 	if (*s == -1) return errno;
 	
 	if (nonblocking) {
@@ -344,7 +344,10 @@ cc_result Socket_Connect(cc_socket* s, cc_sockaddr* addr, cc_bool nonblocking) {
 		if (flags >= 0) fcntl(*s, F_SETFL, flags | O_NONBLOCK);
 	}
 
-	res = connect(*s, raw, addr->size);
+	addr.v4.sin_family = AF_INET;
+	addr.v4.sin_port   = htons(port);
+
+	res = connect(*s, &addr.raw, sizeof(addr.v4));
 	return res == -1 ? errno : 0;
 }
 
@@ -405,6 +408,16 @@ cc_result Socket_CheckWritable(cc_socket s, cc_bool* writable) {
 #define SOC_CTX_ALIGN 0x1000
 #define SOC_CTX_SIZE  0x1000 * 128
 
+cc_result Process_StartOpen(const cc_string* args) {
+	char url[NATIVE_STR_LEN];
+	int len = String_EncodeUtf8(url, args);
+	
+	// TODO: Not sure if this works or not
+	APT_PrepareToStartSystemApplet(APPID_WEB);
+	return APT_StartSystemApplet(APPID_WEB, url, len + 1, CUR_PROCESS_HANDLE); 
+	// len + 1 for null terminator
+}
+
 static void CreateRootDirectory(const char* path) {
 	// create root directories (no permissions anyways)
 	int res = mkdir(path, 0666);
@@ -458,8 +471,6 @@ cc_bool Platform_DescribeError(cc_result res, cc_string* dst) {
 *-------------------------------------------------------Encryption--------------------------------------------------------*
 *#########################################################################################################################*/
 static cc_result GetMachineID(cc_uint32* key) {
-	// doesn't really matter if called multiple times
-	psInit();
 	return PS_GetDeviceId(key);
 }
 #endif

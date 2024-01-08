@@ -19,9 +19,9 @@ extern struct IGameComponent Models_Component;
 enum RotateOrder { ROTATE_ORDER_ZYX, ROTATE_ORDER_XZY, ROTATE_ORDER_YZX, ROTATE_ORDER_XYZ };
 
 /* Describes a vertex within a model. */
-struct ModelVertex { float x, y, z; cc_uint16 U, V; };
+struct ModelVertex { float X, Y, Z; cc_uint16 U, V; };
 static CC_INLINE void ModelVertex_Init(struct ModelVertex* vertex, float x, float y, float z, int u, int v) {
-	vertex->x = x; vertex->y = y; vertex->z = z;
+	vertex->X = x; vertex->Y = y; vertex->Z = z;
 	vertex->U = u; vertex->V = v;
 }
 
@@ -36,9 +36,6 @@ static CC_INLINE void ModelPart_Init(struct ModelPart* part, int offset, int cou
 struct ModelTex;
 /* Contains information about a texture used for models. */
 struct ModelTex { const char* name; cc_uint8 skinType; GfxResourceID texID; struct ModelTex* next; };
-
-#define MODEL_FLAG_INITED    0x01
-#define MODEL_FLAG_CLEAR_HAT 0x02
 
 struct Model;
 /* Contains a set of quads and/or boxes that describe a 3D object as well as
@@ -70,7 +67,7 @@ struct Model {
 	int index;
 	cc_uint8 armX, armY; /* these translate arm model part back to (0, 0) */
 
-	cc_uint8 flags;
+	cc_bool inited;
 	/* Whether the model should be slightly bobbed up and down when rendering. */
 	/* e.g. for HumanoidModel, when legs are at the peak of their swing, whole model is moved slightly down */
 	cc_bool bobbing;
@@ -83,8 +80,7 @@ struct Model {
 	void (*GetTransform)(struct Entity* entity, Vec3 pos, struct Matrix* m);
 	void (*DrawArm)(struct Entity* entity);
 
-	float maxScale, shadowScale;
-	int maxVertices;
+	float maxScale, shadowScale, nameScale;
 	struct Model* next;
 };
 
@@ -128,15 +124,11 @@ CC_API void Model_Render(struct Model* model, struct Entity* entity);
 /* Sets up state to be suitable for rendering the given model. */
 /* NOTE: Model_Render already calls this, you don't normally need to call this. */
 CC_API void Model_SetupState(struct Model* model, struct Entity* entity);
+/* Flushes buffered vertices to the GPU. */
+CC_API void Model_UpdateVB(void);
 /* Applies the skin texture of the given entity to the model. */
 /* Uses model's default texture if the entity doesn't have a custom skin. */
 CC_API void Model_ApplyTexture(struct Entity* entity);
-
-/* Flushes buffered vertices to the GPU. */
-CC_API void Model_UpdateVB(void);
-void Model_LockVB(struct Entity* entity, int verticesCount);
-void Model_UnlockVB(void);
-
 /* Draws the given part with no part-specific rotation (e.g. torso). */
 CC_API void Model_DrawPart(struct ModelPart* part);
 /* Draws the given part with rotation around part's rotation origin. (e.g. arms, head) */
@@ -275,7 +267,6 @@ struct CustomModel {
 	struct Model model;
 	char name[STRING_SIZE + 1];
 	cc_bool registered, defined;
-	cc_uint8 curPartIndex;
 
 	float nameY;
 	float eyeY;
@@ -286,7 +277,7 @@ struct CustomModel {
 	cc_uint16 vScale;
 
 	cc_uint8 numParts;
-	cc_uint8 numArmParts;
+	cc_uint8 curPartIndex;
 	struct CustomModelPart parts[MAX_CUSTOM_MODEL_PARTS];
 };
 

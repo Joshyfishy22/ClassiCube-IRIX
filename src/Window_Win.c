@@ -558,13 +558,9 @@ static void ShowDialogCore(const char* title, const char* msg) {
 
 static cc_result OpenSaveFileDialog(const cc_string* filters, FileDialogCallback callback, cc_bool load,
 									const char* const* fileExts, const cc_string* defaultName) {
-	union OPENFILENAME_union {
-		OPENFILENAMEW wide;
-		OPENFILENAMEA ansi;
-	} ofn = { 0 }; // less compiler warnings this way
-	
 	cc_string path; char pathBuffer[NATIVE_STR_LEN];
 	cc_winstring str  = { 0 };
+	OPENFILENAMEW ofn = { 0 };
 	cc_winstring filter;
 	cc_result res;
 	BOOL ok;
@@ -575,37 +571,35 @@ static cc_result OpenSaveFileDialog(const cc_string* filters, FileDialogCallback
 	/* NOTE: OPENFILENAME_SIZE_VERSION_400 is used instead of sizeof(OFN), because the size of */
 	/*  OPENFILENAME increased after Windows 9x/NT4 with the addition of pvReserved and later fields */
 	/* (and Windows 9x/NT4 return an error if a lStructSize > OPENFILENAME_SIZE_VERSION_400 is used) */
-	ofn.wide.lStructSize  = OPENFILENAME_SIZE_VERSION_400;
+	ofn.lStructSize  = OPENFILENAME_SIZE_VERSION_400;
 	/* also note that this only works when you *don't* have OFN_HOOK in Flags - if you do, then */
 	/*  on modern Windows versions the dialogs are altered to show an old Win 9x style appearance */
 	/* (see https://github.com/geany/geany/issues/578 for example of this problem) */
 
-	ofn.wide.hwndOwner    = win_handle;
-	ofn.wide.lpstrFile    = str.uni;
-	ofn.wide.nMaxFile     = MAX_PATH;
-	ofn.wide.lpstrFilter  = filter.uni;
-	ofn.wide.nFilterIndex = 1;
-	ofn.wide.Flags = OFN_NOCHANGEDIR | OFN_PATHMUSTEXIST | (load ? OFN_FILEMUSTEXIST : OFN_OVERWRITEPROMPT);
+	ofn.hwndOwner    = win_handle;
+	ofn.lpstrFile    = str.uni;
+	ofn.nMaxFile     = MAX_PATH;
+	ofn.lpstrFilter  = filter.uni;
+	ofn.nFilterIndex = 1;
+	ofn.Flags = OFN_NOCHANGEDIR | OFN_PATHMUSTEXIST | (load ? OFN_FILEMUSTEXIST : OFN_OVERWRITEPROMPT);
 
 	String_InitArray(path, pathBuffer);
-	ok = load ? GetOpenFileNameW(&ofn.wide) : GetSaveFileNameW(&ofn.wide);
+	ok = load ? GetOpenFileNameW(&ofn) : GetSaveFileNameW(&ofn);
 	
 	if (ok) {
 		/* Successfully got a unicode filesystem path */
-		for (i = 0; i < MAX_PATH && str.uni[i]; i++) 
-		{
+		for (i = 0; i < MAX_PATH && str.uni[i]; i++) {
 			String_Append(&path, Convert_CodepointToCP437(str.uni[i]));
 		}
 	} else if ((res = CommDlgExtendedError()) == 2) {
 		/* CDERR_INITIALIZATION - probably running on Windows 9x */
-		ofn.ansi.lpstrFile   = str.ansi;
-		ofn.ansi.lpstrFilter = filter.ansi;
+		ofn.lpstrFile   = str.ansi;
+		ofn.lpstrFilter = filter.ansi;
 
-		ok = load ? GetOpenFileNameA(&ofn.ansi) : GetSaveFileNameA(&ofn.ansi);
+		ok = load ? GetOpenFileNameA(&ofn) : GetSaveFileNameA(&ofn);
 		if (!ok) return CommDlgExtendedError();
 
-		for (i = 0; i < MAX_PATH && str.ansi[i]; i++) 
-		{
+		for (i = 0; i < MAX_PATH && str.ansi[i]; i++) {
 			String_Append(&path, str.ansi[i]);
 		}
 	} else {
@@ -613,8 +607,8 @@ static cc_result OpenSaveFileDialog(const cc_string* filters, FileDialogCallback
 	}
 
 	/* Add default file extension if user didn't provide one */
-	if (!load && ofn.wide.nFileExtension == 0 && ofn.wide.nFilterIndex > 0) {
-		String_AppendConst(&path, fileExts[ofn.wide.nFilterIndex - 1]);
+	if (!load && ofn.nFileExtension == 0 && ofn.nFilterIndex > 0) {
+		String_AppendConst(&path, fileExts[ofn.nFilterIndex - 1]);
 	}
 	callback(&path);
 	return 0;
@@ -683,7 +677,7 @@ void Window_AllocFramebuffer(struct Bitmap* bmp) {
 
 void Window_DrawFramebuffer(Rect2D r) {
 	HGDIOBJ oldSrc = SelectObject(draw_DC, draw_DIB);
-	BitBlt(win_DC, r.x, r.y, r.Width, r.Height, draw_DC, r.x, r.y, SRCCOPY);
+	BitBlt(win_DC, r.X, r.Y, r.Width, r.Height, draw_DC, r.X, r.Y, SRCCOPY);
 	SelectObject(draw_DC, oldSrc);
 }
 

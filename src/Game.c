@@ -15,7 +15,6 @@
 #include "Logger.h"
 #include "Entity.h"
 #include "Chat.h"
-#include "Commands.h"
 #include "Drawer2D.h"
 #include "Model.h"
 #include "Particle.h"
@@ -29,7 +28,7 @@
 #include "AxisLinesRenderer.h"
 #include "EnvRenderer.h"
 #include "HeldBlockRenderer.h"
-#include "SelOutlineRenderer.h"
+#include "PickedPosRenderer.h"
 #include "Menus.h"
 #include "Audio.h"
 #include "Stream.h"
@@ -39,7 +38,6 @@
 #include "Animations.h"
 #include "SystemFonts.h"
 #include "Formats.h"
-#include "EntityRenderers.h"
 
 struct _GameData Game;
 cc_uint64 Game_FrameStart;
@@ -51,7 +49,6 @@ int Game_MaxViewDistance = DEFAULT_MAX_VIEWDIST;
 
 int     Game_FpsLimit, Game_Vertices;
 cc_bool Game_SimpleArmsAnim;
-static cc_bool gameRunning;
 
 cc_bool Game_ClassicMode, Game_ClassicHacks;
 cc_bool Game_AllowCustomBlocks;
@@ -232,8 +229,6 @@ cc_bool Game_UpdateTexture(GfxResourceID* texId, struct Stream* src, const cc_st
 
 cc_bool Game_ValidateBitmap(const cc_string* file, struct Bitmap* bmp) {
 	int maxWidth = Gfx.MaxTexWidth, maxHeight = Gfx.MaxTexHeight;
-	float texSize, maxSize;
-
 	if (!bmp->scan0) {
 		Chat_Add1("&cError loading %s from the texture pack.", file);
 		return false;
@@ -243,24 +238,10 @@ cc_bool Game_ValidateBitmap(const cc_string* file, struct Bitmap* bmp) {
 		Chat_Add1("&cUnable to use %s from the texture pack.", file);
 
 		Chat_Add4("&c Its size is (%i,%i), your GPU supports (%i,%i) at most.", 
-				&bmp->width, &bmp->height, &maxWidth, &maxHeight);
+			&bmp->width, &bmp->height, &maxWidth, &maxHeight);
 		return false;
 	}
 
-	if (Gfx.MaxTexSize && (bmp->width * bmp->height > Gfx.MaxTexSize)) {
-		Chat_Add1("&cUnable to use %s from the texture pack.", file);
-		texSize = (bmp->width * bmp->height) / (1024.0f * 1024.0f);
-		maxSize = Gfx.MaxTexSize             / (1024.0f * 1024.0f);
-
-		Chat_Add2("&c Its size is %f3 MB, your GPU supports %f3 MB at most.", 
-				&texSize, &maxSize);
-		return false;
-	}
-
-	return Game_ValidateBitmapPow2(file, bmp);
-}
-
-cc_bool Game_ValidateBitmapPow2(const cc_string* file, struct Bitmap* bmp) {
 	if (!Math_IsPowOf2(bmp->width) || !Math_IsPowOf2(bmp->height)) {
 		Chat_Add1("&cUnable to use %s from the texture pack.", file);
 
@@ -384,7 +365,7 @@ static void LoadPlugins(void) {
 }
 #endif
 
-static void Game_Free(void* obj);
+void Game_Free(void* obj);
 static void Game_Load(void) {
 	struct IGameComponent* comp;
 	Game_UpdateDimensions();
@@ -411,7 +392,6 @@ static void Game_Load(void) {
 	Game_AddComponent(&SystemFonts_Component);
 
 	Game_AddComponent(&Chat_Component);
-	Game_AddComponent(&Commands_Component);
 	Game_AddComponent(&Particles_Component);
 	Game_AddComponent(&TabList_Component);
 	Game_AddComponent(&Models_Component);
@@ -431,11 +411,10 @@ static void Game_Load(void) {
 	Game_AddComponent(&Selections_Component);
 	Game_AddComponent(&HeldBlockRenderer_Component);
 	/* Gfx_SetDepthWrite(true) */
-	Game_AddComponent(&SelOutlineRenderer_Component);
+	Game_AddComponent(&PickedPosRenderer_Component);
 	Game_AddComponent(&Audio_Component);
 	Game_AddComponent(&AxisLinesRenderer_Component);
 	Game_AddComponent(&Formats_Component);
-	Game_AddComponent(&EntityRenderers_Component);
 
 	LoadPlugins();
 	for (comp = comps_head; comp; comp = comp->next) {
@@ -482,7 +461,7 @@ static void Game_Render3D(double delta, float t) {
 
 	AxisLinesRenderer_Render();
 	Entities_RenderModels(delta, t);
-	EntityNames_Render();
+	Entities_RenderNames();
 
 	Particles_Render(t);
 	Camera.Active->GetPickedBlock(&Game_SelectedPos); /* TODO: only pick when necessary */
@@ -493,14 +472,14 @@ static void Game_Render3D(double delta, float t) {
 	MapRenderer_RenderNormal(delta);
 	EnvRenderer_RenderMapSides();
 
-	EntityShadows_Render();
+	Entities_DrawShadows();
 	if (Game_SelectedPos.Valid && !Game_HideGui) {
-		SelOutlineRenderer_Render(&Game_SelectedPos, true);
+		PickedPosRenderer_Render(&Game_SelectedPos, true);
 	}
 
 	/* Render water over translucent blocks when under the water outside the map for proper alpha blending */
 	pos = Camera.CurrentPos;
-	if (pos.y < Env.EdgeHeight && (pos.x < 0 || pos.z < 0 || pos.x > World.Width || pos.z > World.Length)) {
+	if (pos.Y < Env.EdgeHeight && (pos.X < 0 || pos.Z < 0 || pos.X > World.Width || pos.Z > World.Length)) {
 		MapRenderer_RenderTranslucent(delta);
 		EnvRenderer_RenderMapEdges();
 	} else {
@@ -511,12 +490,12 @@ static void Game_Render3D(double delta, float t) {
 	/* Need to render again over top of translucent block, as the selection outline */
 	/* is drawn without writing to the depth buffer */
 	if (Game_SelectedPos.Valid && !Game_HideGui && Blocks.Draw[Game_SelectedPos.block] == DRAW_TRANSLUCENT) {
-		SelOutlineRenderer_Render(&Game_SelectedPos, false);
+		PickedPosRenderer_Render(&Game_SelectedPos, false);
 	}
 
 	Selections_Render();
-	EntityNames_RenderHovered();
-	Camera_KeyLookUpdate(delta);
+	Entities_RenderHoveredNames();
+	Camera_KeyLookUpdate();
 	InputHandler_Tick();
 	if (!Game_HideGui) HeldBlockRenderer_Render(delta);
 }
@@ -592,7 +571,6 @@ static void Game_RenderFrame(double delta) {
 			Gfx_RecreateContext();
 			/* all good, context is back */
 		} else {
-			Game.Time += delta; /* TODO: Not set in two places? */
 			Server.Tick(NULL);
 			Thread_Sleep(16);
 			return;
@@ -642,7 +620,7 @@ static void Game_RenderFrame(double delta) {
 	Gfx_EndFrame();
 }
 
-static void Game_Free(void* obj) {
+void Game_Free(void* obj) {
 	struct IGameComponent* comp;
 	/* Most components will call OnContextLost in their Free functions */
 	/* Set to false so components will always free managed textures too */
@@ -654,7 +632,6 @@ static void Game_Free(void* obj) {
 		if (comp->Free) comp->Free();
 	}
 
-	gameRunning     = false;
 	Logger_WarnFunc = Logger_DialogWarn;
 	Gfx_Free();
 	Options_SaveIfChanged();
@@ -666,7 +643,7 @@ static void Game_Free(void* obj) {
 	delta  = Stopwatch_ElapsedMicroseconds(Game_FrameStart, render) / (1000.0 * 1000.0);\
 	\
 	Window_ProcessEvents(delta);\
-	if (!gameRunning) return;\
+	if (!WindowInfo.Exists) return;\
 	\
 	if (delta > 1.0) delta = 1.0; /* avoid large delta with suspended process */ \
 	if (delta > 0.0) { Game_FrameStart = render; Game_RenderFrame(delta); }
@@ -709,7 +686,6 @@ void Game_Run(int width, int height, const cc_string* title) {
 	Window_Create3D(width, height);
 	Window_SetTitle(title);
 	Window_Show();
-	gameRunning = true;
 
 	Game_Load();
 	Event_RaiseVoid(&WindowEvents.Resized);

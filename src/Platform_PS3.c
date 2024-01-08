@@ -16,32 +16,36 @@
 #include <unistd.h>
 #include <dirent.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <sys/time.h>
+#include <utime.h>
+#include <signal.h>
 #include <net/net.h>
 #include <net/poll.h>
 #include <ppu-lv2.h>
-#include <sys/file.h>
+#include <sys/lv2errno.h>
 #include <sys/mutex.h>
 #include <sys/sem.h>
 #include <sys/thread.h>
 #include <sys/systime.h>
 #include <sys/tty.h>
-#include <sys/process.h>
 #include "_PlatformConsole.h"
 
 const cc_result ReturnCode_FileShareViolation = 1000000000; // not used
 const cc_result ReturnCode_FileNotFound     = 0x80010006; // ENOENT;
-const cc_result ReturnCode_SocketInProgess  = NET_EINPROGRESS;
-const cc_result ReturnCode_SocketWouldBlock = NET_EWOULDBLOCK;
+//const cc_result ReturnCode_SocketInProgess  = 0x80010032; // EINPROGRESS
+//const cc_result ReturnCode_SocketWouldBlock = 0x80010001; // EWOULDBLOCK;
 const cc_result ReturnCode_DirectoryExists  = 0x80010014; // EEXIST
 
+const cc_result ReturnCode_SocketInProgess  = NET_EINPROGRESS;
+const cc_result ReturnCode_SocketWouldBlock = NET_EWOULDBLOCK;
 const char* Platform_AppNameSuffix = " PS3";
 
-SYS_PROCESS_PARAM(1001, 256 * 1024); // 256kb stack size
 
 /*########################################################################################################################*
 *------------------------------------------------------Logging/Time-------------------------------------------------------*
@@ -94,135 +98,121 @@ cc_uint64 Stopwatch_ElapsedMicroseconds(cc_uint64 beg, cc_uint64 end) {
 /*########################################################################################################################*
 *-----------------------------------------------------Directory/File------------------------------------------------------*
 *#########################################################################################################################*/
-static const cc_string root_path = String_FromConst("/dev_hdd0/ClassiCube/");
-
-static void GetNativePath(char* str, const cc_string* path) {
-	Mem_Copy(str, root_path.buffer, root_path.length);
-	str += root_path.length;
-	String_EncodeUtf8(str, path);
-}
-
 cc_result Directory_Create(const cc_string* path) {
 	char str[NATIVE_STR_LEN];
-	GetNativePath(str, path);
+	String_EncodeUtf8(str, path);
 	/* read/write/search permissions for owner and group, and with read/search permissions for others. */
 	/* TODO: Is the default mode in all cases */
-	return sysLv2FsMkdir(str, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+	return mkdir(str, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH) == -1 ? errno : 0;
 }
 
 int File_Exists(const cc_string* path) {
 	char str[NATIVE_STR_LEN];
-	sysFSStat sb;
-	GetNativePath(str, path);
-	return sysLv2FsStat(str, &sb) == 0 && S_ISREG(sb.st_mode);
+	struct stat sb;
+	String_EncodeUtf8(str, path);
+	return stat(str, &sb) == 0 && S_ISREG(sb.st_mode);
 }
 
 cc_result Directory_Enum(const cc_string* dirPath, void* obj, Directory_EnumCallback callback) {
 	cc_string path; char pathBuffer[FILENAME_SIZE];
 	char str[NATIVE_STR_LEN];
-	sysFSDirent entry;
+	DIR* dirPtr;
+	struct dirent* entry;
 	char* src;
-	int dir_fd, res;
+	int len, res, is_dir;
 
-	GetNativePath(str, dirPath);
-	if ((res = sysLv2FsOpenDir(str, &dir_fd))) return res;
+	String_EncodeUtf8(str, dirPath);
+	dirPtr = opendir(str);
+	if (!dirPtr) return errno;
 
-	for (;;)
-	{
-		u64 read = 0;
-		if ((res = sysLv2FsReadDir(dir_fd, &entry, &read))) return res;
-		if (!read) break; // end of entries
+	/* POSIX docs: "When the end of the directory is encountered, a null pointer is returned and errno is not changed." */
+	/* errno is sometimes leftover from previous calls, so always reset it before readdir gets called */
+	errno = 0;
+	String_InitArray(path, pathBuffer);
 
-		// ignore . and .. entry
-		src = entry.d_name;
+	while ((entry = readdir(dirPtr))) {
+		path.length = 0;
+		String_Format1(&path, "%s/", dirPath);
+
+		/* ignore . and .. entry */
+		src = entry->d_name;
 		if (src[0] == '.' && src[1] == '\0') continue;
 		if (src[0] == '.' && src[1] == '.' && src[2] == '\0') continue;
-	
-		String_InitArray(path, pathBuffer);
-		String_Format1(&path, "%s/", dirPath);
-		
-		int len = String_Length(src);	
+
+		len = String_Length(src);
 		String_AppendUtf8(&path, src, len);
 
-		if (entry.d_type == DT_DIR) {
+#if defined CC_BUILD_HAIKU || defined CC_BUILD_SOLARIS || defined CC_BUILD_IRIX || defined CC_BUILD_BEOS
+		{
+			char full_path[NATIVE_STR_LEN];
+			struct stat sb;
+			String_EncodeUtf8(full_path, &path);
+			is_dir = stat(full_path, &sb) == 0 && S_ISDIR(sb.st_mode);
+		}
+#else
+		is_dir = entry->d_type == DT_DIR;
+		/* TODO: fallback to stat when this fails */
+#endif
+
+		if (is_dir) {
 			res = Directory_Enum(&path, obj, callback);
-			if (res) break;
+			if (res) { closedir(dirPtr); return res; }
 		} else {
 			callback(&path, obj);
 		}
+		errno = 0;
 	}
 
-	sysLv2FsCloseDir(dir_fd);
+	res = errno; /* return code from readdir */
+	closedir(dirPtr);
 	return res;
 }
 
 static cc_result File_Do(cc_file* file, const cc_string* path, int mode) {
 	char str[NATIVE_STR_LEN];
-	GetNativePath(str, path);
-	int fd = -1;
-	
-	int access = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
-	int res    = sysLv2FsOpen(str, mode, &fd, access, NULL, 0);
-	
-	if (res) {
-		*file = -1; return res;
-	} else {
-		// TODO: is this actually needed?
-		if (mode & SYS_O_CREAT) sysLv2FsChmod(str, access);
-		*file = fd; return 0;
-	}
+	String_EncodeUtf8(str, path);
+	*file = open(str, mode, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+	return *file == -1 ? errno : 0;
 }
 
 cc_result File_Open(cc_file* file, const cc_string* path) {
-	return File_Do(file, path, SYS_O_RDONLY);
+	return File_Do(file, path, O_RDONLY);
 }
 cc_result File_Create(cc_file* file, const cc_string* path) {
-	return File_Do(file, path, SYS_O_RDWR | SYS_O_CREAT | SYS_O_TRUNC);
+	return File_Do(file, path, O_RDWR | O_CREAT | O_TRUNC);
 }
 cc_result File_OpenOrCreate(cc_file* file, const cc_string* path) {
-	return File_Do(file, path, SYS_O_RDWR | SYS_O_CREAT);
+	return File_Do(file, path, O_RDWR | O_CREAT);
 }
 
 cc_result File_Read(cc_file file, void* data, cc_uint32 count, cc_uint32* bytesRead) {
-	u64 read = 0;
-	int res  = sysLv2FsRead(file, data, count, &read);
-	
-	*bytesRead = read;
-	return res;
+	*bytesRead = read(file, data, count);
+	return *bytesRead == -1 ? errno : 0;
 }
 
 cc_result File_Write(cc_file file, const void* data, cc_uint32 count, cc_uint32* bytesWrote) {
-	u64 wrote = 0;
-	int res   = sysLv2FsWrite(file, data, count, &wrote);
-	
-	*bytesWrote = wrote;
-	return res;
+	*bytesWrote = write(file, data, count);
+	return *bytesWrote == -1 ? errno : 0;
 }
 
 cc_result File_Close(cc_file file) {
-	return sysLv2FsClose(file);
+	return close(file) == -1 ? errno : 0;
 }
 
 cc_result File_Seek(cc_file file, int offset, int seekType) {
-	static cc_uint8 modes[] = { SEEK_SET, SEEK_CUR, SEEK_END };
-	u64 position = 0;
-	return sysLv2FsLSeek64(file, offset, modes[seekType], &position);
+	static cc_uint8 modes[3] = { SEEK_SET, SEEK_CUR, SEEK_END };
+	return lseek(file, offset, modes[seekType]) == -1 ? errno : 0;
 }
 
 cc_result File_Position(cc_file file, cc_uint32* pos) {
-	u64 position = 0;
-	int res = sysLv2FsLSeek64(file, 0, SEEK_CUR, &position);
-	
-	*pos = position;
-	return res;
+	*pos = lseek(file, 0, SEEK_CUR);
+	return *pos == -1 ? errno : 0;
 }
 
 cc_result File_Length(cc_file file, cc_uint32* len) {
-	sysFSStat st;
-	int res = sysLv2FsFStat(file, &st);
-	
-	*len = st.st_size;
-	return res;
+	struct stat st;
+	if (fstat(file, &st) == -1) { *len = -1; return errno; }
+	*len = st.st_size; return 0;
 }
 
 
@@ -339,96 +329,91 @@ union SocketAddress {
 	struct sockaddr raw;
 	struct sockaddr_in v4;
 };
-static cc_result ParseHost(char* host, int port, cc_sockaddr* addrs, int* numValidAddrs) {
+
+static int ParseHost(union SocketAddress* addr, const char* host) {
 	struct net_hostent* res = netGetHostByName(host);
-	struct sockaddr_in* addr4;
 	if (!res) return net_h_errno;
 	
 	// Must have at least one IPv4 address
 	if (res->h_addrtype != AF_INET) return ERR_INVALID_ARGUMENT;
-	if (!res->h_addr_list)          return ERR_INVALID_ARGUMENT;
-	
-	// each address pointer is only 4 bytes long
-	u32* addr_list = (u32*)res->h_addr_list;
-	char* src_addr;
-	int i;
-	
-	for (i = 0; i < SOCKET_MAX_ADDRS; i++) 
-	{
-		src_addr = (char*)addr_list[i];
-		if (!src_addr) break;
-		addrs[i].size = sizeof(struct sockaddr_in);
-		addr4 = (struct sockaddr_in*)addrs[i].data;
-		addr4->sin_family = AF_INET;
-		addr4->sin_port   = htons(port);
-		addr4->sin_addr   = *(struct in_addr*)src_addr;
-	}
-	*numValidAddrs = i;
-	return i == 0 ? ERR_INVALID_ARGUMENT : 0;
+	if (!res->h_addr_list)       return ERR_INVALID_ARGUMENT;
+
+	// TODO probably wrong....
+	addr->v4.sin_addr = *(struct in_addr*)&res->h_addr_list;
+	return 0;
 }
 
-cc_result Socket_ParseAddress(const cc_string* address, int port, cc_sockaddr* addrs, int* numValidAddrs) {
-	struct sockaddr_in* addr4 = (struct sockaddr_in*)addrs[0].data;
+static int ParseAddress(union SocketAddress* addr, const cc_string* address) {
 	char str[NATIVE_STR_LEN];
 	String_EncodeUtf8(str, address);
-	*numValidAddrs = 0;
 
-	if (inet_aton(str, &addr4->sin_addr) > 0) {
-		addr4->sin_family = AF_INET;
-		addr4->sin_port   = htons(port);
-		
-		addrs[0].size  = sizeof(*addr4);
-		*numValidAddrs = 1;
-		return 0;
-	}
-	
-	return ParseHost(str, port, addrs, numValidAddrs);
+	if (inet_aton(str, &addr->v4.sin_addr) > 0) return 0;
+	return ParseHost(addr, str);
 }
 
-cc_result Socket_Connect(cc_socket* s, cc_sockaddr* addr, cc_bool nonblocking) {
-	struct sockaddr* raw = (struct sockaddr*)addr->data;
+int Socket_ValidAddress(const cc_string* address) {
+	union SocketAddress addr;
+	return ParseAddress(&addr, address) == 0;
+}
+
+cc_result Socket_Connect(cc_socket* s, const cc_string* address, int port, cc_bool nonblocking) {
+	union SocketAddress addr;
 	int res;
 
-	res = netSocket(raw->sa_family, SOCK_STREAM, IPPROTO_TCP);
-	if (res < 0) return net_errno;
+	*s  = -1;
+	res = ParseAddress(&addr, address);
+	if (res) return res;
+
+	res = sysNetSocket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	if (res < 0) return res;
 	*s  = res;
 
-	if (nonblocking) {
-		int on = 1;
-		netSetSockOpt(*s, SOL_SOCKET, SO_NBIO, &on, sizeof(int));
-	}
+	// TODO: RPCS3 makes sockets non blocking by default anyways ?
+	/*if (nonblocking) {
+		int blocking_raw = -1;
+		ioctl(*s, FIONBIO, &blocking_raw);
+	}*/
 
-	res = netConnect(*s, raw, addr->size);
-	return res < 0 ? net_errno : 0;
+	addr.v4.sin_family = AF_INET;
+	addr.v4.sin_port   = htons(port);
+
+	return sysNetConnect(*s, &addr.raw, sizeof(addr.v4));
 }
 
 cc_result Socket_Read(cc_socket s, cc_uint8* data, cc_uint32 count, cc_uint32* modified) {
-	int res = netRecv(s, data, count, 0);
-	if (res < 0) return net_errno;
+	int res = sysNetRecvfrom(s, data, count, 0, NULL, NULL);
+	if (res < 0) return res;
 	
 	*modified = res; return 0;
 }
 
 cc_result Socket_Write(cc_socket s, const cc_uint8* data, cc_uint32 count, cc_uint32* modified) {
-	int res = netSend(s, data, count, 0);
-	if (res < 0) return net_errno;
+	int res = sysNetSendto(s, data, count, 0, NULL, 0);
+	if (res < 0) return res;
 	
 	*modified = res; return 0;
 }
 
 void Socket_Close(cc_socket s) {
-	netShutdown(s, SHUT_RDWR);
-	netClose(s);
+	sysNetShutdown(s, SHUT_RDWR);
+	sysNetClose(s);
+}
+
+LV2_SYSCALL CC_sysNetPoll(struct pollfd* fds, s32 nfds, s32 ms)
+{
+	lv2syscall3(715, (u64)fds, nfds, ms);
+	return_to_user_prog(s32);
 }
 
 static cc_result Socket_Poll(cc_socket s, int mode, cc_bool* success) {
 	struct pollfd pfd;
-	int flags;
+	int flags, res;
 
 	pfd.fd     = s;
 	pfd.events = mode == SOCKET_POLL_READ ? POLLIN : POLLOUT;
 	
-	if (netPoll(&pfd, 1, 0) < 0) return net_errno;
+	res = CC_sysNetPoll(&pfd, 1, 0);
+	if (res) return res;
 	
 	/* to match select, closed socket still counts as readable */
 	flags    = mode == SOCKET_POLL_READ ? (POLLIN | POLLHUP) : POLLOUT;
@@ -445,7 +430,7 @@ cc_result Socket_CheckWritable(cc_socket s, cc_bool* writable) {
 	cc_result res = Socket_Poll(s, SOCKET_POLL_WRITE, writable);
 	if (res || *writable) return res;
 
-	// https://stackoverflow.com/questions/29479953/so-error-value-after-successful-socket-operation
+	/* https://stackoverflow.com/questions/29479953/so-error-value-after-successful-socket-operation */
 	netGetSockOpt(s, SOL_SOCKET, SO_ERROR, &res, &resultSize);
 	return res;
 }
@@ -454,10 +439,12 @@ cc_result Socket_CheckWritable(cc_socket s, cc_bool* writable) {
 /*########################################################################################################################*
 *--------------------------------------------------------Platform---------------------------------------------------------*
 *#########################################################################################################################*/
+cc_result Process_StartOpen(const cc_string* args) {
+	return ERR_NOT_SUPPORTED;
+}
+
 void Platform_Init(void) {
 	netInitialize();
-	// Create root directory
-	Directory_Create(&String_Empty);
 }
 
 void Platform_Free(void) { }

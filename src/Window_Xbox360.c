@@ -45,7 +45,7 @@ void Window_Init(void) {
 	WindowInfo.Focused = true;
 	WindowInfo.Exists  = true;
 
-	Input.Sources = INPUT_SOURCE_GAMEPAD;
+	Input.GamepadSource = true;
 	
 	usb_init();
 	usb_do_poll();
