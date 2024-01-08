@@ -16,6 +16,7 @@
 #include <wiikeyboard/keyboard.h>
 #endif
 
+static cc_bool needsFBUpdate;
 static cc_bool launcherMode;
 static void* xfb;
 static GXRModeObj* rmode;
@@ -28,16 +29,10 @@ int Display_ScaleY(int y) { return y; }
 
 
 static void OnPowerOff(void) {
-	Event_RaiseVoid(&WindowEvents.Closing);
 	WindowInfo.Exists = false;
+	Window_Close();
 }
-
-void Window_Init(void) {	
-	// TODO: SYS_SetResetCallback(reload); too? not sure how reset differs on GC/WII
-	#if defined HW_RVL
-	SYS_SetPowerCallback(OnPowerOff);
-	#endif
-	
+static void InitVideo(void) {
 	// Initialise the video system
 	VIDEO_Init();
 
@@ -61,6 +56,14 @@ void Window_Init(void) {
 	VIDEO_Flush();
 	// Wait for Video setup to complete
 	VIDEO_WaitVSync();
+}
+
+void Window_Init(void) {	
+	// TODO: SYS_SetResetCallback(reload); too? not sure how reset differs on GC/WII
+	#if defined HW_RVL
+	SYS_SetPowerCallback(OnPowerOff);
+	#endif
+	InitVideo();
 	
 	DisplayInfo.Width  = rmode->fbWidth;
 	DisplayInfo.Height = rmode->xfbHeight;
@@ -73,6 +76,9 @@ void Window_Init(void) {
 	WindowInfo.Exists  = true;
 
 	Input.Sources = INPUT_SOURCE_GAMEPAD;
+	DisplayInfo.ContentOffsetX = 10;
+	DisplayInfo.ContentOffsetY = 10;
+
 	#if defined HW_RVL
 	WPAD_Init();
 	WPAD_SetDataFormat(0, WPAD_FMT_BTNS_ACC_IR);
@@ -81,11 +87,17 @@ void Window_Init(void) {
 	PAD_Init();
 }
 
-void Window_Create2D(int width, int height) { launcherMode = true;  }
-void Window_Create3D(int width, int height) { launcherMode = false; }
+void Window_Create2D(int width, int height) {
+	needsFBUpdate = true;
+	launcherMode  = true;  
+}
+
+void Window_Create3D(int width, int height) { 
+	launcherMode = false; 
+}
 
 void Window_Close(void) {
-	/* TODO implement */
+	Event_RaiseVoid(&WindowEvents.Closing);
 }
 
 
@@ -465,14 +477,21 @@ static u32 CvtRGB (u8 r1, u8 g1, u8 b1, u8 r2, u8 g2, u8 b2)
 }
 
 void Window_DrawFramebuffer(Rect2D r) {
+	// When coming back from the 3D game, framebuffer might have changed
+	if (needsFBUpdate) {
+		VIDEO_SetNextFramebuffer(xfb);
+		VIDEO_Flush();
+		needsFBUpdate = false;
+	}
+	
 	VIDEO_WaitVSync();
-	r.X &= ~0x01; // round down to nearest even horizontal index
+	r.x &= ~0x01; // round down to nearest even horizontal index
 	
 	// TODO XFB is raw yuv, but is absolutely a pain to work with..
-	for (int y = r.Y; y < r.Y + r.Height; y++) 
+	for (int y = r.y; y < r.y + r.Height; y++) 
 	{
-		cc_uint32* src = fb_bmp.scan0 + y * fb_bmp.width   + r.X;
-		u16* dst       = (u16*)xfb    + y * rmode->fbWidth + r.X;
+		cc_uint32* src = fb_bmp.scan0 + y * fb_bmp.width   + r.x;
+		u16* dst       = (u16*)xfb    + y * rmode->fbWidth + r.x;
 		
 		for (int x = 0; x < r.Width / 2; x++) {
 			cc_uint32 rgb0 = src[(x<<1) + 0];

@@ -14,10 +14,11 @@
 #define NOSERVICE
 #define NOMCX
 #define NOIME
+#define CUR_PROCESS_HANDLE ((HANDLE)-1) /* GetCurrentProcess() always returns -1 */
 
 #include <windows.h>
 #include <imagehlp.h>
-static HANDLE curProcess = (HANDLE)-1; /* GetCurrentProcess() always returns -1 */
+static HANDLE curProcess = CUR_PROCESS_HANDLE;
 #elif defined CC_BUILD_OPENBSD || defined CC_BUILD_HAIKU || defined CC_BUILD_SERENITY
 #include <signal.h>
 /* These operating systems don't provide sys/ucontext.h */
@@ -273,10 +274,21 @@ static void DumpFrame(cc_string* trace, void* addr) {
 *-------------------------------------------------------Backtracing-------------------------------------------------------*
 *#########################################################################################################################*/
 #if defined CC_BUILD_WIN
+/* This callback function is used so stack Walking works using StackWalk properly on Windows 9x: */
+/*  - on Windows 9x process ID is passed instead of process handle as the "process" argument */
+/*  - the SymXYZ functions expect a process ID on Windows 9x, so that works fine */
+/*  - if NULL is passed as the "ReadMemory" argument, the default callback using ReadProcessMemory is used */
+/*  - however, ReadProcessMemory expects a process handle, and so that will fail since it's given a process ID */
+/* So to work around this, instead manually call ReadProcessMemory with the current process handle */
+static BOOL __stdcall ReadMemCallback(HANDLE process, DWORD_PTR baseAddress, PVOID buffer, DWORD size, PDWORD numBytesRead) {
+	return ReadProcessMemory(CUR_PROCESS_HANDLE, (LPCVOID)baseAddress, buffer, size, numBytesRead);
+}
+static cc_uintptr spRegister;
+
 static int GetFrames(CONTEXT* ctx, cc_uintptr* addrs, int max) {
 	STACKFRAME frame = { 0 };
-	HANDLE process, thread;
 	int count, type;
+	HANDLE thread;
 
 	frame.AddrPC.Mode    = AddrModeFlat;
 	frame.AddrFrame.Mode = AddrModeFlat;
@@ -287,21 +299,22 @@ static int GetFrames(CONTEXT* ctx, cc_uintptr* addrs, int max) {
 	frame.AddrPC.Offset    = ctx->Eip;
 	frame.AddrFrame.Offset = ctx->Ebp;
 	frame.AddrStack.Offset = ctx->Esp;
+	spRegister             = ctx->Esp;
 #elif defined _M_X64
 	type = IMAGE_FILE_MACHINE_AMD64;
 	frame.AddrPC.Offset    = ctx->Rip;
 	frame.AddrFrame.Offset = ctx->Rsp;
 	frame.AddrStack.Offset = ctx->Rsp;
+	spRegister             = ctx->Rsp;
 #else
 	/* Always available after XP, so use that */
 	return RtlCaptureStackBackTrace(0, max, (void**)addrs, NULL);
 #endif
-	process = GetCurrentProcess();
-	thread  = GetCurrentThread();
+	thread = GetCurrentThread();
 
 	for (count = 0; count < max; count++) 
 	{
-		if (!StackWalk(type, process, thread, &frame, ctx, NULL, SymFunctionTableAccess, SymGetModuleBase, NULL)) break;
+		if (!StackWalk(type, curProcess, thread, &frame, ctx, ReadMemCallback, SymFunctionTableAccess, SymGetModuleBase, NULL)) break;
 		if (!frame.AddrFrame.Offset) break;
 		addrs[count] = frame.AddrPC.Offset;
 	}
@@ -487,7 +500,7 @@ static void PrintRegisters(cc_string* str, void* ctx) {
 	#define REG_GET_PC()      &r->Pc
 	Dump_ARM32()
 #elif defined _M_ARM64
-	#define REG_GNUM(num)     &r->X[num]
+	#define REG_GNUM(num)     &r->x[num]
 	#define REG_GET_FP()      &r->Fp
 	#define REG_GET_LR()      &r->Lr
 	#define REG_GET_SP()      &r->Sp
@@ -848,6 +861,35 @@ static void DumpRegisters(void* ctx) {
 *------------------------------------------------Module/Memory map handling-----------------------------------------------*
 *#########################################################################################################################*/
 #if defined CC_BUILD_WIN
+static void DumpStack(void) {
+	static const cc_string stack = String_FromConst("-- stack --\r\n");
+	cc_string str; char strBuffer[128];
+	cc_uint8 buffer[0x10];
+	SIZE_T numRead;
+	int i, j;
+
+	Logger_Log(&stack);
+	spRegister &= ~0x0F;
+	spRegister -= 0x40;
+
+	/* Dump 128 bytes near stack pointer */
+	for (i = 0; i < 8; i++, spRegister += 0x10) 
+	{
+		String_InitArray(str, strBuffer);
+		String_Format1(&str, "0x%x)", &spRegister);
+		ReadProcessMemory(CUR_PROCESS_HANDLE, (LPCVOID)spRegister, buffer, 0x10, &numRead);
+
+		for (j = 0; j < 0x10; j++)
+		{
+			if ((j & 0x03) == 0) String_Append(&str, ' ');
+			String_AppendHex(&str, buffer[j]);
+			String_Append(&str,    ' ');
+		}
+		String_AppendConst(&str, "\r\n");
+		Logger_Log(&str);
+	}
+}
+
 static BOOL CALLBACK DumpModule(const char* name, ULONG_PTR base, ULONG size, void* userCtx) {
 	cc_string str; char strBuffer[256];
 	cc_uintptr beg, end;
@@ -863,6 +905,7 @@ static BOOL CALLBACK DumpModule(const char* name, ULONG_PTR base, ULONG size, vo
 static BOOL (WINAPI *_EnumerateLoadedModules)(HANDLE process, PENUMLOADED_MODULES_CALLBACK callback, PVOID userContext);
 static void DumpMisc(void) {
 	static const cc_string modules = String_FromConst("-- modules --\r\n");
+	if (spRegister >= 0xFFFF) DumpStack();
 
 	if (!_EnumerateLoadedModules) return;
 	Logger_Log(&modules);
@@ -1029,7 +1072,7 @@ void Logger_Hook(void) {
 	DynamicLib_LoadAll(&imagehlp, funcs, Array_Elems(funcs), &lib);
 
 	/* Windows 9x requires process IDs instead - see old DBGHELP docs */
-	/* https://documentation.help/DbgHelp/documentation.pdf */
+	/*   https://documentation.help/DbgHelp/documentation.pdf */
 	osInfo.dwOSVersionInfoSize = sizeof(OSVERSIONINFOA);
 	osInfo.dwPlatformId        = 0;
 	GetVersionExA(&osInfo);

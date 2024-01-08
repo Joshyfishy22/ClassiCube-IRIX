@@ -346,7 +346,7 @@ void TextAtlas_Add(struct TextAtlas* atlas, int charI, struct VertexTextured** v
 	struct Texture part = atlas->tex;
 	int width = atlas->widths[charI];
 
-	part.X  = atlas->curX; part.Width = width;
+	part.x  = atlas->curX; part.Width = width;
 	part.uv.U1 = atlas->offsets[charI] * atlas->uScale;
 	part.uv.U2 = part.uv.U1 + width    * atlas->uScale;
 
@@ -435,7 +435,8 @@ void Screen_Render2Widgets(void* screen, double delta) {
 
 void Screen_UpdateVb(void* screen) {
 	struct Screen* s = (struct Screen*)screen;
-	Gfx_RecreateDynamicVb(&s->vb, VERTEX_FORMAT_TEXTURED, s->maxVertices);
+	Gfx_DeleteDynamicVb(&s->vb);
+	s->vb = Gfx_CreateDynamicVb(VERTEX_FORMAT_TEXTURED, s->maxVertices);
 }
 
 struct VertexTextured* Screen_LockVb(void* screen) {
@@ -478,6 +479,20 @@ int Screen_Index(void* screen, void* widget) {
 	}
 	return -1;
 }
+
+int Screen_CalcDefaultMaxVertices(void* screen) {
+	struct Screen* s = (struct Screen*)screen;
+	struct Widget** widgets = s->widgets;
+	int i, count = 0;
+
+	for (i = 0; i < s->numWidgets; i++)
+	{
+		if (!widgets[i]) continue;
+		count += widgets[i]->VTABLE->GetMaxVertices(widgets[i]);
+	}
+	return count;
+}
+
 
 void Screen_BuildMesh(void* screen) {
 	struct Screen* s = (struct Screen*)screen;

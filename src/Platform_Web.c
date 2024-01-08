@@ -227,10 +227,6 @@ cc_result File_Length(cc_file file, cc_uint32* len) {
 *#########################################################################################################################*/
 /* No real threading support with emscripten backend */
 void  Thread_Sleep(cc_uint32 milliseconds) { }
-void* Thread_Create(Thread_StartFunc func) { return NULL; }
-void  Thread_Start2(void* handle, Thread_StartFunc func) { func(); }
-void  Thread_Detach(void* handle) { }
-void  Thread_Join(void* handle) { }
 
 void* Mutex_Create(void) { return NULL; }
 void  Mutex_Free(void* handle) { }
@@ -254,18 +250,26 @@ void Platform_LoadSysFonts(void) { }
 *---------------------------------------------------------Socket----------------------------------------------------------*
 *#########################################################################################################################*/
 extern void interop_InitSockets(void);
-int Socket_ValidAddress(const cc_string* address) { return true; }
+
+cc_result Socket_ParseAddress(const cc_string* address, int port, cc_sockaddr* addrs, int* numValidAddrs) {
+	int len = String_EncodeUtf8(addrs[0].data, address);
+	/* TODO can this ever happen */
+	if (len >= CC_SOCKETADDR_MAXSIZE) Logger_Abort("Overrun in Socket_ParseAddress");
+
+	addrs[0].size  = port;
+	*numValidAddrs = 1;
+	return 0;
+}
 
 extern int interop_SocketCreate(void);
-extern int interop_SocketConnect(int sock, const char* addr, int port);
-cc_result Socket_Connect(cc_socket* s, const cc_string* address, int port, cc_bool nonblocking) {
-	char addr[NATIVE_STR_LEN];
+extern int interop_SocketConnect(int sock, const cc_uint8* host, int port);
+cc_result Socket_Connect(cc_socket* s, cc_sockaddr* addr, cc_bool nonblocking) {
 	int res;
-	String_EncodeUtf8(addr, address);
 
 	*s  = interop_SocketCreate();
+	/* size is used to store port number instead */
 	/* returned result is negative for error */
-	res = -interop_SocketConnect(*s, addr, port);
+	res = -interop_SocketConnect(*s, addr->data, addr->size);
 
 	/* error returned when invalid address provided */
 	if (res == _EHOSTUNREACH) return ERR_INVALID_ARGUMENT;
@@ -322,6 +326,8 @@ cc_result Socket_CheckWritable(cc_socket s, cc_bool* writable) {
 /*########################################################################################################################*
 *-----------------------------------------------------Process/Module------------------------------------------------------*
 *#########################################################################################################################*/
+cc_bool Process_OpenSupported = true;
+
 void Process_Exit(cc_result code) {
 	/* 'Window' (i.e. the web canvas) isn't implicitly closed when process is exited */
 	if (code) Window_Close();

@@ -102,17 +102,11 @@ static void Gfx_DoMipmaps(int x, int y, struct Bitmap* bmp, int rowWidth, cc_boo
 	if (prev != bmp->scan0) Mem_Free(prev);
 }
 
-#if !defined CC_BUILD_IRIX
-GfxResourceID Gfx_CreateTexture(struct Bitmap* bmp, cc_uint8 flags, cc_bool mipmaps) {
+static GfxResourceID Gfx_AllocTexture(struct Bitmap* bmp, cc_uint8 flags, cc_bool mipmaps) {
 	GLuint texId;
 	glGenTextures(1, &texId);
 	glBindTexture(GL_TEXTURE_2D, texId);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
-	if (!Math_IsPowOf2(bmp->width) || !Math_IsPowOf2(bmp->height)) {
-		Logger_Abort("Textures must have power of two dimensions");
-	}
-	if (Gfx.LostContext) return 0;
 
 	if (mipmaps) {
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_LINEAR);
@@ -168,8 +162,7 @@ void Gfx_UpdateTexturePart(GfxResourceID texId, int x, int y, struct Bitmap* par
 #if !defined CC_BUILD_IRIX
 void Gfx_DeleteTexture(GfxResourceID* texId) {
 	GLuint id = (GLuint)(*texId);
-	if (!id) return;
-	glDeleteTextures(1, &id);
+	if (id) glDeleteTextures(1, &id);
 	*texId = 0;
 }
 #endif
@@ -212,13 +205,13 @@ void Gfx_CalcOrthoMatrix(struct Matrix* matrix, float width, float height, float
 	/*   The simplified calculation below uses: L = 0, R = width, T = 0, B = height */
 	*matrix = Matrix_Identity;
 
-	matrix->row1.X =  2.0f / width;
-	matrix->row2.Y = -2.0f / height;
-	matrix->row3.Z = -2.0f / (zFar - zNear);
+	matrix->row1.x =  2.0f / width;
+	matrix->row2.y = -2.0f / height;
+	matrix->row3.z = -2.0f / (zFar - zNear);
 
-	matrix->row4.X = -1.0f;
-	matrix->row4.Y =  1.0f;
-	matrix->row4.Z = -(zFar + zNear) / (zFar - zNear);
+	matrix->row4.x = -1.0f;
+	matrix->row4.y =  1.0f;
+	matrix->row4.z = -(zFar + zNear) / (zFar - zNear);
 }
 
 static double Cotangent(double x) { return Math_Cos(x) / Math_Sin(x); }
@@ -232,12 +225,12 @@ void Gfx_CalcPerspectiveMatrix(struct Matrix* matrix, float fov, float aspect, f
 	/* Calculations are simplified because of left/right and top/bottom symmetry */
 	*matrix = Matrix_Identity;
 
-	matrix->row1.X =  c / aspect;
-	matrix->row2.Y =  c;
-	matrix->row3.Z = -(zFar + zNear) / (zFar - zNear);
-	matrix->row3.W = -1.0f;
-	matrix->row4.Z = -(2.0f * zFar * zNear) / (zFar - zNear);
-	matrix->row4.W =  0.0f;
+	matrix->row1.x =  c / aspect;
+	matrix->row2.y =  c;
+	matrix->row3.z = -(zFar + zNear) / (zFar - zNear);
+	matrix->row3.w = -1.0f;
+	matrix->row4.z = -(2.0f * zFar * zNear) / (zFar - zNear);
+	matrix->row4.w =  0.0f;
 }
 
 
@@ -297,7 +290,7 @@ void Gfx_GetApiInfo(cc_string* info) {
 	String_Format1(info, "Renderer: %c\n",   glGetString(GL_RENDERER));
 	String_Format1(info, "GL version: %c\n", glGetString(GL_VERSION));
 	AppendVRAMStats(info);
-	String_Format2(info, "Max texture size: (%i, %i)\n", &Gfx.MaxTexWidth, &Gfx.MaxTexHeight);
+	PrintMaxTextureInfo(info);
 	String_Format1(info, "Depth buffer bits: %i\n",      &depthBits);
 	GLContext_GetApiInfo(info);
 }

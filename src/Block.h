@@ -61,8 +61,8 @@ CC_VAR extern struct _BlockLists {
 	/* Can be < 1 to slow player down, or > 1 to speed up. */
 	float SpeedMultiplier[BLOCK_COUNT];
 	/* Bit flags of which faces of this block uses light colour from neighbouring blocks. */
-	/*   e.g. a block with Min.X of 0.0 uses light colour at X-1,Y,Z for XMIN face. */
-	/*   e.g. a block with Min.X of 0.1 uses light colour at X,Y,Z   for XMIN face. */
+	/*   e.g. a block with Min.x of 0.0 uses light colour at X-1,Y,Z for XMIN face. */
+	/*   e.g. a block with Min.x of 0.1 uses light colour at X,Y,Z   for XMIN face. */
 	cc_uint8 LightOffset[BLOCK_COUNT];
 	/* Draw method used when rendering this block. See DrawType enum. */
 	cc_uint8 Draw[BLOCK_COUNT];
@@ -124,7 +124,8 @@ void Block_ResetProps(BlockID block);
 
 /* Gets the name of the given block */
 /* NOTE: Name points directly within underlying buffer, you MUST NOT persist this string */
-CC_API STRING_REF cc_string Block_UNSAFE_GetName(BlockID block);
+CC_API STRING_REF  cc_string Block_UNSAFE_GetName(      BlockID block);
+typedef STRING_REF cc_string (*FP_Block_UNSAFE_GetName)(BlockID block);
 /* Sets the name of the given block. */
 void Block_SetName(BlockID block, const cc_string* name);
 /* Finds the ID of the block whose name caselessly matches given name */

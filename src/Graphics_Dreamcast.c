@@ -4,15 +4,11 @@
 #include "Errors.h"
 #include "Logger.h"
 #include "Window.h"
-#include "GL/gl.h"
-#include "GL/glkos.h"
+#include "../third_party/gldc/include/gldc.h"
 #include <malloc.h>
 #include <kos.h>
 #include <dc/matrix.h>
 #include <dc/pvr.h>
-
-/* Current format and size of vertices */
-static int gfx_stride, gfx_format = -1;
 static cc_bool renderingDisabled;
 
 
@@ -20,9 +16,10 @@ static cc_bool renderingDisabled;
 *---------------------------------------------------------General---------------------------------------------------------*
 *#########################################################################################################################*/
 void Gfx_Create(void) {
-	glKosInit();
-	glGetIntegerv(GL_MAX_TEXTURE_SIZE, &Gfx.MaxTexWidth);
-	Gfx.MaxTexHeight = Gfx.MaxTexWidth;
+	if (!Gfx.Created) glKosInit();
+	// NOTE: technically 1024 is supported by hardware
+	Gfx.MaxTexWidth  = 512;
+	Gfx.MaxTexHeight = 512;
 	Gfx.Created      = true;
 	Gfx_RestoreState();
 }
@@ -53,7 +50,7 @@ void Gfx_ClearCol(PackedCol color) {
 	float r = PackedCol_R(color) / 255.0f;
 	float g = PackedCol_G(color) / 255.0f;
 	float b = PackedCol_B(color) / 255.0f;
-	pvr_set_bg_color(r, g, b);
+	pvr_set_bg_color(r, g, b); // TODO: not working ?
 }
 
 void Gfx_SetColWriteMask(cc_bool r, cc_bool g, cc_bool b, cc_bool a) {
@@ -81,13 +78,13 @@ void Gfx_CalcOrthoMatrix(struct Matrix* matrix, float width, float height, float
 	/*   The simplified calculation below uses: L = 0, R = width, T = 0, B = height */
 	*matrix = Matrix_Identity;
 
-	matrix->row1.X =  2.0f / width;
-	matrix->row2.Y = -2.0f / height;
-	matrix->row3.Z = -2.0f / (zFar - zNear);
+	matrix->row1.x =  2.0f / width;
+	matrix->row2.y = -2.0f / height;
+	matrix->row3.z = -2.0f / (zFar - zNear);
 
-	matrix->row4.X = -1.0f;
-	matrix->row4.Y =  1.0f;
-	matrix->row4.Z = -(zFar + zNear) / (zFar - zNear);
+	matrix->row4.x = -1.0f;
+	matrix->row4.y =  1.0f;
+	matrix->row4.z = -(zFar + zNear) / (zFar - zNear);
 }
 
 static double Cotangent(double x) { return Math_Cos(x) / Math_Sin(x); }
@@ -101,48 +98,12 @@ void Gfx_CalcPerspectiveMatrix(struct Matrix* matrix, float fov, float aspect, f
 	/* Calculations are simplified because of left/right and top/bottom symmetry */
 	*matrix = Matrix_Identity;
 
-	matrix->row1.X =  c / aspect;
-	matrix->row2.Y =  c;
-	matrix->row3.Z = -(zFar + zNear) / (zFar - zNear);
-	matrix->row3.W = -1.0f;
-	matrix->row4.Z = -(2.0f * zFar * zNear) / (zFar - zNear);
-	matrix->row4.W =  0.0f;
-}
-
-
-/*########################################################################################################################*
-*-----------------------------------------------------------Misc----------------------------------------------------------*
-*#########################################################################################################################*/
-cc_result Gfx_TakeScreenshot(struct Stream* output) {
-	return ERR_NOT_SUPPORTED;
-}
-
-void Gfx_GetApiInfo(cc_string* info) {
-	int pointerSize = sizeof(void*) * 8;
-
-	String_Format1(info, "-- Using OpenGL (%i bit) --\n", &pointerSize);
-	String_Format1(info, "Vendor: %c\n",     glGetString(GL_VENDOR));
-	String_Format1(info, "Renderer: %c\n",   glGetString(GL_RENDERER));
-	String_Format2(info, "Max texture size: (%i, %i)\n", &Gfx.MaxTexWidth, &Gfx.MaxTexHeight);
-}
-
-void Gfx_SetFpsLimit(cc_bool vsync, float minFrameMs) {
-	gfx_minFrameMs = minFrameMs;
-	gfx_vsync      = vsync;
-}
-
-void Gfx_BeginFrame(void) { }
-void Gfx_Clear(void) {
-	// no need to use glClear
-}
-
-void Gfx_EndFrame(void) {
-	glKosSwapBuffers();
-	if (gfx_minFrameMs) LimitFPS();
-}
-
-void Gfx_OnWindowResize(void) {
-	glViewport(0, 0, Game.Width, Game.Height);
+	matrix->row1.x =  c / aspect;
+	matrix->row2.y =  c;
+	matrix->row3.z = -(zFar + zNear) / (zFar - zNear);
+	matrix->row3.w = -1.0f;
+	matrix->row4.z = -(2.0f * zFar * zNear) / (zFar - zNear);
+	matrix->row4.w =  0.0f;
 }
 
 
@@ -153,7 +114,7 @@ static void* gfx_vertices;
 static int vb_size;
 
 GfxResourceID Gfx_CreateIb2(int count, Gfx_FillIBFunc fillFunc, void* obj) {
-	return 1;
+	return (void*)1;
 }
 
 void Gfx_BindIb(GfxResourceID ib) { }
@@ -163,11 +124,8 @@ void Gfx_DeleteIb(GfxResourceID* ib) { }
 /*########################################################################################################################*
 *------------------------------------------------------Vertex buffers-----------------------------------------------------*
 *#########################################################################################################################*/
-GfxResourceID Gfx_CreateVb(VertexFormat fmt, int count) {
-	void* data = memalign(16, count * strideSizes[fmt]);
-	if (!data) Logger_Abort("Failed to allocate memory for GFX VB");
-	return data;
-	//return Mem_Alloc(count, strideSizes[fmt], "gfx VB");
+static GfxResourceID Gfx_AllocStaticVb(VertexFormat fmt, int count) {
+	return memalign(16, count * strideSizes[fmt]);
 }
 
 void Gfx_BindVb(GfxResourceID vb) { gfx_vertices = vb; }
@@ -189,12 +147,11 @@ void Gfx_UnlockVb(GfxResourceID vb) {
 }
 
 
-GfxResourceID Gfx_CreateDynamicVb(VertexFormat fmt, int maxVertices) {
-	void* data = memalign(16, maxVertices * strideSizes[fmt]);
-	if (!data) Logger_Abort("Failed to allocate memory for GFX VB");
-	return data;
-	//return Mem_Alloc(maxVertices, strideSizes[fmt], "gfx VB");
+static GfxResourceID Gfx_AllocDynamicVb(VertexFormat fmt, int maxVertices) {
+	return memalign(16, maxVertices * strideSizes[fmt]);
 }
+
+void Gfx_BindDynamicVb(GfxResourceID vb) { Gfx_BindVb(vb); }
 
 void* Gfx_LockDynamicVb(GfxResourceID vb, VertexFormat fmt, int count) {
 	vb_size = count * strideSizes[fmt];
@@ -206,11 +163,7 @@ void Gfx_UnlockDynamicVb(GfxResourceID vb) {
 	//dcache_flush_range(vb, vb_size);
 }
 
-void Gfx_SetDynamicVbData(GfxResourceID vb, void* vertices, int vCount) {
-	gfx_vertices = vb;
-	Mem_Copy(vb, vertices, vCount * gfx_stride);
-	//dcache_flush_range(vertices, vCount * gfx_stride);
-}
+void Gfx_DeleteDynamicVb(GfxResourceID* vb) { Gfx_DeleteVb(vb); }
 
 
 /*########################################################################################################################*
@@ -243,9 +196,10 @@ static unsigned Interleave(unsigned x) {
 }
 
 /*static int CalcTwiddledIndex(int x, int y, int w, int h) {
-	// Twiddled index looks like this (starting from lowest numbered bits):
-	//   e.g. w > h: yx_yx_xx_xx
-	//   e.g. h > w: yx_yx_yy_yy
+	// Twiddled index looks like this (lowest numbered bits are leftmost):
+	//   - w = h: yxyx yxyx
+	//   - w > h: yxyx xxxx
+	//   - h > w: yxyx yyyy
 	// And can therefore be broken down into two components:
 	//  1) interleaved lower bits
 	//  2) masked and then shifted higher bits
@@ -253,7 +207,7 @@ static unsigned Interleave(unsigned x) {
 	int min_dimension    = Math.Min(w, h);
 	
 	int interleave_mask  = min_dimension - 1;
-	int interleaved_bits = Math_Log2(min_dimension);
+	int interleaved_bits = Math_ilog2(min_dimension);
 	
 	int shifted_mask = (~0) & ~interleave_mask;
 	// as lower interleaved bits contain both X and Y, need to adjust the
@@ -279,8 +233,8 @@ static unsigned Interleave(unsigned x) {
 #define Twiddle_CalcFactors(w, h) \
 	min_dimension    = min(w, h); \
 	interleave_mask  = min_dimension - 1; \
-	interleaved_bits = Math_Log2(min_dimension); \
-	shifted_mask     = 0xFFFFFFFFU & ~interleave_mask; \
+	interleaved_bits = Math_ilog2(min_dimension); \
+	shifted_mask     = ~interleave_mask; \
 	shift_bits       = interleaved_bits;
 	
 #define Twiddle_CalcY(y) \
@@ -318,12 +272,9 @@ static void ConvertTexture(cc_uint16* dst, struct Bitmap* bmp) {
 	}
 }
 
-GfxResourceID Gfx_CreateTexture(struct Bitmap* bmp, cc_uint8 flags, cc_bool mipmaps) {
+static GfxResourceID Gfx_AllocTexture(struct Bitmap* bmp, cc_uint8 flags, cc_bool mipmaps) {
 	GLuint texId = gldcGenTexture();
 	gldcBindTexture(texId);
-	if (!Math_IsPowOf2(bmp->width) || !Math_IsPowOf2(bmp->height)) {
-		Logger_Abort("Textures must have power of two dimensions");
-	}
 	
 	gldcAllocTexture(bmp->width, bmp->height, GL_RGBA,
 				GL_UNSIGNED_SHORT_4_4_4_4_REV_TWID_KOS);
@@ -334,6 +285,7 @@ GfxResourceID Gfx_CreateTexture(struct Bitmap* bmp, cc_uint8 flags, cc_bool mipm
 	ConvertTexture(pixels, bmp);
 	return texId;
 }
+
 // TODO: struct GPUTexture ??
 static void ConvertSubTexture(cc_uint16* dst, int texWidth, int texHeight,
 				int originX, int originY, 
@@ -485,13 +437,9 @@ static CC_NOINLINE void UnshiftTextureCoords(int count) {
 static void Gfx_FreeState(void) { FreeDefaultResources(); }
 static void Gfx_RestoreState(void) {
 	InitDefaultResources();
-	glEnableClientState(GL_VERTEX_ARRAY);
-	glEnableClientState(GL_COLOR_ARRAY);
 	gfx_format = -1;
 
 	glAlphaFunc(GL_GREATER, 0.5f);
-	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-	glDepthFunc(GL_LEQUAL);
 }
 
 cc_bool Gfx_WarnIfNecessary(void) {
@@ -507,10 +455,10 @@ cc_bool Gfx_WarnIfNecessary(void) {
 static void SetupVertices(int startVertex) {
 	if (gfx_format == VERTEX_FORMAT_TEXTURED) {
 		cc_uint32 offset = startVertex * SIZEOF_VERTEX_TEXTURED;
-		glVertexPointer(3, GL_FLOAT, SIZEOF_VERTEX_TEXTURED, (void*)(VB_PTR + offset));
+		gldcVertexPointer(SIZEOF_VERTEX_TEXTURED, (void*)(VB_PTR + offset));
 	} else {
 		cc_uint32 offset = startVertex * SIZEOF_VERTEX_COLOURED;
-		glVertexPointer(3, GL_FLOAT, SIZEOF_VERTEX_COLOURED, (void*)(VB_PTR + offset));
+		gldcVertexPointer(SIZEOF_VERTEX_COLOURED, (void*)(VB_PTR + offset));
 	}
 }
 
@@ -520,10 +468,8 @@ void Gfx_SetVertexFormat(VertexFormat fmt) {
 	gfx_stride = strideSizes[fmt];
 
 	if (fmt == VERTEX_FORMAT_TEXTURED) {
-		glEnableClientState(GL_TEXTURE_COORD_ARRAY);
 		glEnable(GL_TEXTURE_2D);
 	} else {
-		glDisableClientState(GL_TEXTURE_COORD_ARRAY);
 		glDisable(GL_TEXTURE_2D);
 	}
 }
@@ -550,7 +496,49 @@ void Gfx_DrawIndexedTris_T2fC4b(int verticesCount, int startVertex) {
 	if (renderingDisabled) return;
 	
 	cc_uint32 offset = startVertex * SIZEOF_VERTEX_TEXTURED;
-	glVertexPointer(3, GL_FLOAT, SIZEOF_VERTEX_TEXTURED, (void*)(VB_PTR + offset));
+	gldcVertexPointer(SIZEOF_VERTEX_TEXTURED, (void*)(VB_PTR + offset));
 	glDrawArrays(GL_QUADS, 0, verticesCount);
+}
+
+
+/*########################################################################################################################*
+*-----------------------------------------------------------Misc----------------------------------------------------------*
+*#########################################################################################################################*/
+cc_result Gfx_TakeScreenshot(struct Stream* output) {
+	return ERR_NOT_SUPPORTED;
+}
+
+void Gfx_GetApiInfo(cc_string* info) {
+	GLint freeMem, usedMem;
+	glGetIntegerv(GL_FREE_TEXTURE_MEMORY_KOS, &freeMem);
+	glGetIntegerv(GL_USED_TEXTURE_MEMORY_KOS, &usedMem);
+	
+	float freeMemMB = freeMem / (1024.0 * 1024.0);
+	float usedMemMB = usedMem / (1024.0 * 1024.0);
+	
+	String_AppendConst(info, "-- Using Dreamcast --\n");
+	String_AppendConst(info, "GPU: PowerVR2 CLX2 100mHz\n");
+	String_AppendConst(info, "T&L: GLdc library (KallistiOS / Kazade)\n");
+	String_Format2(info,     "Texture memory: %f2 MB used, %f2 MB free\n", &usedMemMB, &freeMemMB);
+	PrintMaxTextureInfo(info);
+}
+
+void Gfx_SetFpsLimit(cc_bool vsync, float minFrameMs) {
+	gfx_minFrameMs = minFrameMs;
+	gfx_vsync      = vsync;
+}
+
+void Gfx_BeginFrame(void) { }
+void Gfx_Clear(void) {
+	// no need to use glClear
+}
+
+void Gfx_EndFrame(void) {
+	glKosSwapBuffers();
+	if (gfx_minFrameMs) LimitFPS();
+}
+
+void Gfx_OnWindowResize(void) {
+	glViewport(0, 0, Game.Width, Game.Height);
 }
 #endif

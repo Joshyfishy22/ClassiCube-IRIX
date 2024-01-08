@@ -74,7 +74,10 @@ void Window_Init(void) {
 	WindowInfo.Focused = true;
 	WindowInfo.Exists  = true;
 
-	Input.GamepadSource = true;
+	Input.Sources = INPUT_SOURCE_GAMEPAD;
+	DisplayInfo.ContentOffsetX = 10;
+	DisplayInfo.ContentOffsetY = 10;
+
 	usbh_core_init();
 	usbh_xid_init();
 	
@@ -98,7 +101,7 @@ void Window_Show(void) { }
 void Window_SetSize(int width, int height) { }
 
 void Window_Close(void) {
-	/* TODO implement */
+	Event_RaiseVoid(&WindowEvents.Closing);
 }
 
 
@@ -130,6 +133,8 @@ static void HandleButtons(xid_gamepad_in* gp) {
 	
 	Input_SetNonRepeatable(CCPAD_START,  mods & XINPUT_GAMEPAD_START);
 	Input_SetNonRepeatable(CCPAD_SELECT, mods & XINPUT_GAMEPAD_BACK);
+	Input_SetNonRepeatable(CCPAD_LSTICK, mods & XINPUT_GAMEPAD_LEFT_THUMB);
+	Input_SetNonRepeatable(CCPAD_RSTICK, mods & XINPUT_GAMEPAD_RIGHT_THUMB);
 	
 	Input_SetNonRepeatable(CCPAD_LEFT,   mods & XINPUT_GAMEPAD_DPAD_LEFT);
 	Input_SetNonRepeatable(CCPAD_RIGHT,  mods & XINPUT_GAMEPAD_DPAD_RIGHT);
@@ -188,10 +193,10 @@ void Window_DrawFramebuffer(Rect2D r) {
 	//  however this will cause pbkit's attempt to install an interrupt
 	//  handler fail - so instead just accept tearing in the launcher
 
-	cc_uint32* src = (cc_uint32*)fb_bmp.scan0 + r.X;
-	cc_uint32* dst = (cc_uint32*)fb           + r.X;
+	cc_uint32* src = (cc_uint32*)fb_bmp.scan0 + r.x;
+	cc_uint32* dst = (cc_uint32*)fb           + r.x;
 
-	for (int y = r.Y; y < r.Y + r.Height; y++) 
+	for (int y = r.y; y < r.y + r.Height; y++) 
 	{
 		Mem_Copy(dst + y * fb_bmp.width, src + y * fb_bmp.width, r.Width * 4);
 	}
