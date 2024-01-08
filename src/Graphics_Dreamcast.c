@@ -142,6 +142,8 @@ void Gfx_EndFrame(void) {
 }
 
 void Gfx_OnWindowResize(void) {
+	/* TODO: Eliminate this nasty hack.. */
+	Game_UpdateDimensions();
 	glViewport(0, 0, Game.Width, Game.Height);
 }
 
