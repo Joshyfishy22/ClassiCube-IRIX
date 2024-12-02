@@ -136,7 +136,7 @@ endif
 
 ifeq ($(PLAT),irix)
 	CC      = gcc
-	LIBS    = -lGL -lX11 -lXi -lpthread -ldl
+	LIBS    = -lGL -lX11 -lXi -lpthread -ldl -lGLcore -Wl,--allow-shlib-undefine -DCC_BUILD_GL11
 	BUILD_DIR = build-irix
 endif
 

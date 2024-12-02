@@ -54,7 +54,7 @@
 /* XIM support based off details described in */
 /* https://tedyin.com/posts/a-brief-intro-to-linux-input-method-framework/ */
 #endif
-#ifdef CC_BUILD_HPUX
+#if defined CC_BUILD_HPUX || defined CC_BUILD_IRIX
 #undef CC_BUILD_XIM
 #endif
 
@@ -382,12 +382,10 @@ static void DoCreateWindow(int width, int height) {
 
 	Window win = XCreateWindow(win_display, win_rootWin, x, y, width, height,
 		0, win_visual.depth /* CopyFromParent*/, InputOutput, win_visual.visual,
-#ifdef CC_BUILD_IRIX
-		CWColormap | CWEventMask | CWBlackPixel | CWBorderPixel, &attributes);
-#else
+
 		/* Omitting black/border pixels produces nicer looking resizing on some WMs */
 		CWColormap | CWEventMask, &attributes);
-#endif
+
 
 	if (!win) Process_Abort("XCreateWindow failed");
 
