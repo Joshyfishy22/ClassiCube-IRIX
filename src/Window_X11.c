@@ -383,8 +383,13 @@ static void DoCreateWindow(int width, int height) {
 	Window win = XCreateWindow(win_display, win_rootWin, x, y, width, height,
 		0, win_visual.depth /* CopyFromParent*/, InputOutput, win_visual.visual,
 
+
+#ifdef CC_BUILD_IRIX
+		CWColormap | CWEventMask | CWBackPixel | CWBorderPixel, &attributes);
+#else
 		/* Omitting black/border pixels produces nicer looking resizing on some WMs */
 		CWColormap | CWEventMask, &attributes);
+#endif
 
 
 	if (!win) Process_Abort("XCreateWindow failed");
