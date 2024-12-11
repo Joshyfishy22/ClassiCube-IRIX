@@ -54,6 +54,7 @@
 /* XIM support based off details described in */
 /* https://tedyin.com/posts/a-brief-intro-to-linux-input-method-framework/ */
 #endif
+
 #if defined CC_BUILD_HPUX || defined CC_BUILD_IRIX
 #undef CC_BUILD_XIM
 #endif
