@@ -919,9 +919,9 @@ cc_bool GLContext_SwapBuffers(void) {
 	return true;
 }
 
-void GLContext_SetFpsLimit(cc_bool vsync, float minFrameMs) {
-	if (!wglSwapIntervalEXT) return;
-	wglSwapIntervalEXT(vsync);
+void GLContext_SetVSync(cc_bool vsync) {
+	if (!_wglSwapIntervalEXT) return;
+	_wglSwapIntervalEXT(vsync);
 }
 void GLContext_GetApiInfo(cc_string* info) { }
 #endif

@@ -368,9 +368,8 @@ cc_result Gfx_TakeScreenshot(struct Stream* output) {
 	return ERR_NOT_SUPPORTED;
 }
 
-void Gfx_SetFpsLimit(cc_bool vsync, float minFrameMs) {
-	gfx_minFrameMs = minFrameMs;
-	gfx_vsync      = vsync;
+void Gfx_SetVSync(cc_bool vsync) {
+	gfx_vsync = vsync;
 }
 
 void Gfx_BeginFrame(void) { 
@@ -386,8 +385,7 @@ void Gfx_EndFrame(void) {
 	Platform_LogConst("END FRAME A");
 	Xe_Resolve(xe);
 	Xe_Sync(xe);
-	
-	if (gfx_minFrameMs) LimitFPS();
+	Platform_LogConst("END FRAME B");
 }
 
 cc_bool Gfx_WarnIfNecessary(void) { return false; }
