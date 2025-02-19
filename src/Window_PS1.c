@@ -12,12 +12,8 @@
 #include "ExtMath.h"
 #include "Logger.h"
 #include "VirtualKeyboard.h"
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <psxapi.h>
 #include <psxetc.h>
-#include <psxgte.h>
 #include <psxgpu.h>
 #include <psxpad.h>
 
@@ -170,6 +166,8 @@ void Gamepads_Process(float delta) {
 /*########################################################################################################################*
 *------------------------------------------------------Framebuffer--------------------------------------------------------*
 *#########################################################################################################################*/
+extern void Gfx_TransferToVRAM(int x, int y, int w, int h, void* pixels);
+
 void Window_AllocFramebuffer(struct Bitmap* bmp, int width, int height) {
 	bmp->scan0  = (BitmapCol*)Mem_Alloc(width * height, BITMAPCOLOR_SIZE, "window pixels");
 	bmp->width  = width;
@@ -177,14 +175,7 @@ void Window_AllocFramebuffer(struct Bitmap* bmp, int width, int height) {
 }
 
 void Window_DrawFramebuffer(Rect2D r, struct Bitmap* bmp) {
-	RECT rect;
-	rect.x = 0;
-	rect.y = 0;
-	rect.w = SCREEN_XRES;
-	rect.h = SCREEN_YRES;
-
-	LoadImage(&rect, bmp->scan0);
-	DrawSync(0);
+	Gfx_TransferToVRAM(0, 0, SCREEN_XRES, SCREEN_YRES, bmp->scan0);
 }
 
 void Window_FreeFramebuffer(struct Bitmap* bmp) {

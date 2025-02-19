@@ -204,15 +204,19 @@ static const cc_string curlAlt = String_FromConst("libcurl.so.3");
 static cc_bool LoadCurlFuncs(void) {
 	static const struct DynamicLibSym funcs[] = {
 #if !defined CC_BUILD_OS2
-		DynamicLib_Sym(curl_global_init),    DynamicLib_Sym(curl_global_cleanup),
-		DynamicLib_Sym(curl_easy_init),      DynamicLib_Sym(curl_easy_perform),
-		DynamicLib_Sym(curl_easy_setopt),    DynamicLib_Sym(curl_easy_cleanup),
-		DynamicLib_Sym(curl_slist_free_all), DynamicLib_Sym(curl_slist_append)
+		DynamicLib_ReqSym(curl_global_init),    DynamicLib_ReqSym(curl_global_cleanup),
+		DynamicLib_ReqSym(curl_easy_init),      DynamicLib_ReqSym(curl_easy_perform),
+		DynamicLib_ReqSym(curl_easy_setopt),    DynamicLib_ReqSym(curl_easy_cleanup),
+		DynamicLib_ReqSym(curl_slist_free_all), DynamicLib_ReqSym(curl_slist_append),
+		/* Non-essential function missing in older curl versions */
+		DynamicLib_OptSym(curl_easy_strerror)
 #else
-		DynamicLib_SymC(curl_global_init),    DynamicLib_SymC(curl_global_cleanup),
-		DynamicLib_SymC(curl_easy_init),      DynamicLib_SymC(curl_easy_perform),
-		DynamicLib_SymC(curl_easy_setopt),    DynamicLib_SymC(curl_easy_cleanup),
-		DynamicLib_SymC(curl_slist_free_all), DynamicLib_SymC(curl_slist_append)
+		DynamicLib_ReqSymC(curl_global_init),    DynamicLib_ReqSymC(curl_global_cleanup),
+		DynamicLib_ReqSymC(curl_easy_init),      DynamicLib_ReqSymC(curl_easy_perform),
+		DynamicLib_ReqSymC(curl_easy_setopt),    DynamicLib_ReqSymC(curl_easy_cleanup),
+		DynamicLib_ReqSymC(curl_slist_free_all), DynamicLib_ReqSymC(curl_slist_append),
+		/* Non-essential function missing in older curl versions */
+		DynamicLib_OptSymC(curl_easy_strerror)
 #endif
 	};
 	cc_bool success;
@@ -222,9 +226,6 @@ static cc_bool LoadCurlFuncs(void) {
 	if (!lib) { 
 		success = DynamicLib_LoadAll(&curlAlt, funcs, Array_Elems(funcs), &lib);
 	}
-
-	/* Non-essential function missing in older curl versions */
-	_curl_easy_strerror = DynamicLib_Get2(lib, "curl_easy_strerror");
 	return success;
 }
 
@@ -1074,7 +1075,11 @@ static cc_result HttpBackend_Do(struct HttpRequest* req, cc_string* url) {
 
 	Http_SetRequestHeaders(req);
 	Http_AddHeader(req, "User-Agent", Http_GetUserAgent_UNSAFE());
-	if (req->data && (res = Http_SetData(env, req))) return res;
+	
+	if (req->data) {
+		if (res = Http_SetData(env, req)) return res;
+		HttpRequest_Free(req);
+	}
 
 	req->_capacity = 0;
 	req->progress  = HTTP_PROGRESS_FETCHING_DATA;
@@ -1160,14 +1165,11 @@ static cc_result HttpBackend_Do(struct HttpRequest* req, cc_string* url) {
     Http_AddHeader(req, "User-Agent", Http_GetUserAgent_UNSAFE());
     CFRelease(urlRef);
     
-    if (req->data && req->size) {
+    if (req->data) {
         CFDataRef body = CFDataCreate(NULL, req->data, req->size);
         CFHTTPMessageSetBody(request, body);
         CFRelease(body); /* TODO: ???? */
-        
-        req->data = NULL;
-        req->size = 0;
-        Mem_Free(req->data);
+		HttpRequest_Free(req);
     }
     
     CFReadStreamRef stream = CFReadStreamCreateForHTTPRequest(NULL, request);

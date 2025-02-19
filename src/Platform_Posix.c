@@ -840,11 +840,15 @@ cc_result Process_StartGame2(const cc_string* args, int numArgs) {
 #else
 static cc_result Process_RawStart(const char* path, char** argv) {
 	pid_t pid = fork();
+	int err;
 	if (pid == -1) return errno;
 
 	if (pid == 0) {
 		/* Executed in child process */
 		execvp(path, argv);
+
+		err = errno;
+		Platform_Log2("execv %c failed = %i", path, &err);
 		_exit(127); /* "command not found" */
 	} else {
 		/* Executed in parent process */
@@ -1447,6 +1451,10 @@ static cc_result GetMachineID(cc_uint32* key) {
 	return res;
 }
 #elif defined CC_BUILD_MACOS
+/* kIOMasterPortDefault is deprecated since macOS 12.0 (replaced with kIOMainPortDefault) */
+/* And since kIOMasterPortDefault is just 0/NULL anyways, just manually declare it */
+static const mach_port_t masterPortDefault = 0;
+
 /* Read kIOPlatformUUIDKey from I/O registry for the key */
 static cc_result GetMachineID(cc_uint32* key) {
 	io_registry_entry_t registry;
@@ -1454,7 +1462,7 @@ static cc_result GetMachineID(cc_uint32* key) {
 	char tmp[256] = { 0 };
 
 #ifdef kIOPlatformUUIDKey
-    registry = IORegistryEntryFromPath(kIOMasterPortDefault, "IOService:/");
+    registry = IORegistryEntryFromPath(masterPortDefault, "IOService:/");
     if (!registry) return ERR_NOT_SUPPORTED;
 
 	devID = IORegistryEntryCreateCFProperty(registry, CFSTR(kIOPlatformUUIDKey), kCFAllocatorDefault, 0);
@@ -1462,7 +1470,7 @@ static cc_result GetMachineID(cc_uint32* key) {
 		DecodeMachineID(tmp, String_Length(tmp), key);	
 	}
 #else
-    registry = IOServiceGetMatchingService(kIOMasterPortDefault,
+    registry = IOServiceGetMatchingService(masterPortDefault,
                                            IOServiceMatching("IOPlatformExpertDevice"));
 
     devID = IORegistryEntryCreateCFProperty(registry, CFSTR(kIOPlatformSerialNumberKey), kCFAllocatorDefault, 0);
@@ -1601,7 +1609,14 @@ cc_result Platform_Decrypt(const void* data, int len, cc_string* dst) {
 }
 
 cc_result Platform_GetEntropy(void* data, int len) {
-	return ERR_NOT_SUPPORTED;
+	int ret;
+	int fd = open("/dev/urandom", O_RDONLY);
+	if (fd < 0) return ERR_NOT_SUPPORTED;
+	
+	// TODO: check return code? and partial reads?
+	ret = read(fd, data, len);
+	close(fd);
+	return ret == -1 ? errno : 0;
 }
 
 

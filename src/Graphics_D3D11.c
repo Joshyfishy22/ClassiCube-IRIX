@@ -107,7 +107,7 @@ static PFN_D3D11_CREATE_DEVICE _D3D11CreateDevice;
 
 static void LoadD3D11Library(void) {
 	static const struct DynamicLibSym funcs[] = {
-		DynamicLib_Sym(D3D11CreateDevice)
+		DynamicLib_ReqSym(D3D11CreateDevice)
 	};
 	static const cc_string path = String_FromConst("d3d11.dll");
 	void* lib;
@@ -495,7 +495,7 @@ void Gfx_DrawVb_IndexedTris(int verticesCount) {
 	ID3D11DeviceContext_DrawIndexed(context, ICOUNT(verticesCount), 0, 0);
 }
 
-void Gfx_DrawVb_IndexedTris_Range(int verticesCount, int startVertex) {
+void Gfx_DrawVb_IndexedTris_Range(int verticesCount, int startVertex, DrawHints hints) {
 	ID3D11DeviceContext_DrawIndexed(context, ICOUNT(verticesCount), 0, startVertex);
 }
 

@@ -5,7 +5,7 @@ CC_BEGIN_HEADER
 
 /* 
 Abstracts platform specific memory management, I/O, etc
-Copyright 2014-2023 ClassiCube | Licensed under BSD-3
+Copyright 2014-2025 ClassiCube | Licensed under BSD-3
 */
 
 #if defined CC_BUILD_WIN || defined CC_BUILD_XBOX
@@ -124,21 +124,27 @@ CC_API cc_bool DynamicLib_DescribeError(cc_string* dst);
 
 /* The default file extension used for dynamic libraries on this platform. */
 extern const cc_string DynamicLib_Ext;
-#define DYNAMICLIB_QUOTE(x) #x
-#define DynamicLib_Sym(sym) { DYNAMICLIB_QUOTE(sym), (void**)&_ ## sym }
-#define DynamicLib_Sym2(name, sym) { name,           (void**)&_ ## sym }
-#if defined CC_BUILD_OS2
-#define DynamicLib_SymC(sym) { DYNAMICLIB_QUOTE(_ ## sym), (void**)&_ ## sym }
-#endif
-
 CC_API cc_result DynamicLib_Load(const cc_string* path, void** lib); /* OBSOLETE */
 CC_API cc_result DynamicLib_Get(void* lib, const char* name, void** symbol); /* OBSOLETE */
+
+#define DYNAMICLIB_QUOTE(x) #x
+#define DynamicLib_ReqSym(sym) { DYNAMICLIB_QUOTE(sym), (void**)&_ ## sym, true  }
+#define DynamicLib_OptSym(sym) { DYNAMICLIB_QUOTE(sym), (void**)&_ ## sym, false }
+
+#define DynamicLib_ReqSym2(name, sym) { name,           (void**)&_ ## sym, true  }
+#define DynamicLib_OptSym2(name, sym) { name,           (void**)&_ ## sym, false }
+
+#if defined CC_BUILD_OS2
+#define DynamicLib_ReqSymC(sym) { DYNAMICLIB_QUOTE(_ ## sym), (void**)&_ ## sym, true  }
+#define DynamicLib_OptSymC(sym) { DYNAMICLIB_QUOTE(_ ## sym), (void**)&_ ## sym, false }
+#endif
+
 /* Contains a name and a pointer to variable that will hold the loaded symbol */
 /*  static int (APIENTRY *_myGetError)(void); --- (for example) */
-/*  static struct DynamicLibSym sym = { "myGetError", (void**)&_myGetError }; */
-struct DynamicLibSym { const char* name; void** symAddr; };
+/*  static struct DynamicLibSym sym = { "myGetError", (void**)&_myGetError, true }; */
+struct DynamicLibSym { const char* name; void** symAddr; cc_bool required; };
 /* Loads all symbols using DynamicLib_Get2 in the given list */
-/* Returns true if all symbols were successfully retrieved */
+/* Returns true if all required symbols were successfully retrieved */
 cc_bool DynamicLib_LoadAll(const cc_string* path, const struct DynamicLibSym* syms, int count, void** lib);
 
 

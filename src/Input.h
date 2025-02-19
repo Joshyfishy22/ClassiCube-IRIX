@@ -5,7 +5,7 @@ CC_BEGIN_HEADER
 
 /* 
 Manages input state and raising input related events
-Copyright 2014-2023 ClassiCube | Licensed under BSD-3
+Copyright 2014-2025 ClassiCube | Licensed under BSD-3
 */
 struct IGameComponent;
 struct InputDevice;
@@ -183,14 +183,17 @@ extern struct TouchPointer touches[INPUT_MAX_POINTERS];
 #define TOUCH_TYPE_ALL (TOUCH_TYPE_GUI | TOUCH_TYPE_CAMERA | TOUCH_TYPE_BLOCKS)
 
 /* Data for mouse and touch */
-struct Pointer { 
-	int x, y;
+struct Pointer { int x, y; };
+CC_VAR extern struct Pointer Pointers[INPUT_MAX_POINTERS];
+
+CC_VAR extern struct _PointerHooks {
 	/* Function that overrides all normal pointer input press handling */
 	cc_bool (*DownHook)(int index);
 	/* Function that overrides all normal pointer input release handling */
 	cc_bool (*UpHook)  (int index);
-};
-CC_VAR extern struct Pointer Pointers[INPUT_MAX_POINTERS];
+	/* Function that overrides all normal pointer input press handling */
+	cc_bool (*MoveHook)(int index);
+} PointerHooks;
 
 /* Raises appropriate events for a mouse vertical scroll */
 void Mouse_ScrollVWheel(float delta);

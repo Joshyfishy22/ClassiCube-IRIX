@@ -19,7 +19,7 @@ IMPLEMENTATION NOTES:
   * altering DEFAULT_GFX_BACKEND for the platform in Core.h
 - graphics backends are implemented in Graphics_GL1.c, Graphics_D3D9.c etc
    
-Copyright 2014-2023 ClassiCube | Licensed under BSD-3
+Copyright 2014-2025 ClassiCube | Licensed under BSD-3
 */
 struct Bitmap;
 struct Stream;
@@ -68,9 +68,8 @@ CC_VAR extern struct _GfxData {
 	struct Matrix View, Projection;
 	/* Whether the graphics backend supports non power of two textures */
 	cc_bool SupportsNonPowTwoTextures;
-	/* Whether the graphics backend supports U/V that don't occupy whole texture */
-	/*   e.g. Saturn, 3D0 systems don't support it */
-	cc_bool NoUVSupport;
+	/* Limitations of the graphics backend, see GFX_LIMIT values */
+	cc_bool Limitations;
 	/* Type of the backend (e.g. OpenGL, Direct3D 9, etc)*/
 	cc_uint8 BackendType;
 	cc_bool __pad;
@@ -86,14 +85,20 @@ CC_VAR extern struct _GfxData {
 	GfxResourceID DefaultIb;
 } Gfx;
 
+/* Whether the graphics backend supports U/V that don't occupy whole texture */
+/*   e.g. Saturn, 3D0 systems don't support it */
+#define GFX_LIMIT_NO_UV_SUPPORT   0x01
+/* Whether the graphics backend requires very large quads to be broken */
+/*  up into smaller quads, to reduce fog interpolation artifacts */
+#define GFX_LIMIT_VERTEX_ONLY_FOG 0x02
+
 extern const cc_string Gfx_LowPerfMessage;
 
 #define ICOUNT(verticesCount) (((verticesCount) >> 2) * 6)
 #define GFX_MAX_INDICES (65536 / 4 * 6)
 #define GFX_MAX_VERTICES 65536
 
-void  Gfx_RecreateTexture(GfxResourceID* tex, struct Bitmap* bmp, cc_uint8 flags, cc_bool mipmaps);
-void* Gfx_RecreateAndLockVb(GfxResourceID* vb, VertexFormat fmt, int count);
+void Gfx_RecreateTexture(GfxResourceID* tex, struct Bitmap* bmp, cc_uint8 flags, cc_bool mipmaps);
 
 
 /*########################################################################################################################*
@@ -327,7 +332,8 @@ CC_API void Gfx_SetDynamicVbData(GfxResourceID vb, void* vertices, int vCount);
 
 /*########################################################################################################################*
 *------------------------------------------------------Vertex drawing-----------------------------------------------------*
-*#########################################################################################################################*//*
+*#########################################################################################################################*/
+/*
 SUMMARY:
 	Vertex drawing functions draw lines or triangles from the currently active vertex buffer
 IMPLEMENTATION NOTES:
@@ -338,13 +344,19 @@ USAGE NOTES:
 	With the triangle drawing functions, the default bound index buffer
 	  is setup to draw groups of 2 triangles from 4 vertices (1 quad)
 */
+
+typedef enum DrawHints_ {
+	DRAW_HINT_NONE   = 0,
+	DRAW_HINT_SPRITE = 9,
+} DrawHints;
+
 /* Sets the format of the rendered vertices */
 CC_API void Gfx_SetVertexFormat(VertexFormat fmt);
 /* Renders vertices from the currently bound vertex buffer as lines */
 CC_API void Gfx_DrawVb_Lines(int verticesCount);
 /* Renders vertices from the currently bound vertex and index buffer as triangles */
 /* NOTE: Offsets each index by startVertex */
-CC_API void Gfx_DrawVb_IndexedTris_Range(int verticesCount, int startVertex);
+CC_API void Gfx_DrawVb_IndexedTris_Range(int verticesCount, int startVertex, DrawHints hints);
 /* Renders vertices from the currently bound vertex and index buffer as triangles */
 CC_API void Gfx_DrawVb_IndexedTris(int verticesCount);
 /* Special case Gfx_DrawVb_IndexedTris_Range for map renderer */

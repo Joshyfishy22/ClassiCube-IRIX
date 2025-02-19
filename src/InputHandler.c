@@ -88,8 +88,8 @@ const cc_uint8 Hotkeys_LWJGL[256] = {
 	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
 };
-struct HotkeyData HotkeysList[HOTKEYS_MAX_COUNT];
-struct StringsBuffer HotkeysText;
+struct HotkeyData CC_BIG_VAR HotkeysList[HOTKEYS_MAX_COUNT];
+struct StringsBuffer CC_BIG_VAR HotkeysText;
 
 static void Hotkeys_QuickSort(int left, int right) {
 	struct HotkeyData* keys = HotkeysList; struct HotkeyData key;
@@ -821,7 +821,6 @@ static void OnPointerDown(void* obj, int idx) {
 static void OnPointerUp(void* obj, int idx) {
 	struct Screen* s;
 	int i, x, y;
-	if (Pointers[0].UpHook && Pointers[0].UpHook(idx)) return;
 
 #ifdef CC_BUILD_TOUCH
 	CheckBlockTap(idx);

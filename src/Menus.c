@@ -36,6 +36,7 @@
 #include "SystemFonts.h"
 #include "Lighting.h"
 #include "InputHandler.h"
+#include "Protocol.h"
 
 /*########################################################################################################################*
 *--------------------------------------------------------Menu base--------------------------------------------------------*
@@ -185,6 +186,7 @@ int Menu_InputDown(void* screen, int key, struct InputDevice* device) {
 /*########################################################################################################################*
 *------------------------------------------------------Menu utilities-----------------------------------------------------*
 *#########################################################################################################################*/
+#ifndef CC_DISABLE_UI
 static void Menu_BeginGen(int width, int height, int length) {
 	World_NewMap();
 	World_SetDimensions(width, height, length);
@@ -1407,11 +1409,15 @@ static void SaveLevelScreen_Save(void* screen, void* widget) {
 	SaveLevelScreen_RemoveOverwrites(s);
 	if ((res = SaveLevelScreen_SaveMap(&path))) return;
 	Chat_Add1("&eSaved map to: %s", &path);
+	CPE_SendNotifyAction(NOTIFY_ACTION_LEVEL_SAVED, 0);
 }
 
 static void SaveLevelScreen_UploadCallback(const cc_string* path) {
 	cc_result res = SaveLevelScreen_SaveMap(path);
-	if (!res) Chat_Add1("&eSaved map to: %s", path);
+	if (!res) {
+		Chat_Add1("&eSaved map to: %s", path);
+		CPE_SendNotifyAction(NOTIFY_ACTION_LEVEL_SAVED, 0);
+	}
 }
 
 static void SaveLevelScreen_File(void* screen, void* b) {
@@ -1555,6 +1561,8 @@ static void TexturePackScreen_EntryClick(void* screen, void* widget) {
 	TexturePack_SetDefault(&file);
 	TexturePack_Url.length = 0;
 	res = TexturePack_ExtractCurrent(true);
+
+	CPE_SendNotifyAction(NOTIFY_ACTION_TEXTURE_PACK_CHANGED, 0);
 
 	/* FileNotFound error may be because user deleted .zips from disc */
 	if (res != ReturnCode_FileNotFound) return;
@@ -2558,7 +2566,7 @@ static int TexIdsOverlay_RenderTerrain(struct TexIdsOverlay* s, int offset) {
 	{
 		Atlas1D_Bind(i);
 
-		Gfx_DrawVb_IndexedTris_Range(count, offset);
+		Gfx_DrawVb_IndexedTris_Range(count, offset, DRAW_HINT_SPRITE);
 		offset += count;
 	}
 	return offset;
@@ -2600,7 +2608,7 @@ static void TexIdsOverlay_Render(void* screen, float delta) {
 	offset = TexIdsOverlay_RenderTerrain(s, offset);
 
 	Gfx_BindTexture(s->idAtlas.tex.ID);
-	Gfx_DrawVb_IndexedTris_Range(s->textVertices, offset);
+	Gfx_DrawVb_IndexedTris_Range(s->textVertices, offset, DRAW_HINT_SPRITE);
 }
 
 static int TexIdsOverlay_KeyDown(void* screen, int key, struct InputDevice* device) {
@@ -2731,8 +2739,11 @@ static cc_bool TexPackOverlay_IsAlways(void* screen, void* w) {
 static void TexPackOverlay_YesClick(void* screen, void* widget) {
 	struct TexPackOverlay* s = (struct TexPackOverlay*)screen;
 	TexturePack_Extract(&s->url);
-	if (TexPackOverlay_IsAlways(s, widget)) TextureCache_Accept(&s->url);
+	if (TexPackOverlay_IsAlways(s, widget)) TextureUrls_Accept(&s->url);
 	Gui_Remove((struct Screen*)s);
+
+	if (TexPackOverlay_IsAlways(s, widget)) CPE_SendNotifyAction(NOTIFY_ACTION_TEXTURE_PROMPT_RESPONDED, 3);
+	else CPE_SendNotifyAction(NOTIFY_ACTION_TEXTURE_PROMPT_RESPONDED, 2);
 }
 
 static void TexPackOverlay_NoClick(void* screen, void* widget) {
@@ -2744,8 +2755,11 @@ static void TexPackOverlay_NoClick(void* screen, void* widget) {
 
 static void TexPackOverlay_ConfirmNoClick(void* screen, void* b) {
 	struct TexPackOverlay* s = (struct TexPackOverlay*)screen;
-	if (s->alwaysDeny) TextureCache_Deny(&s->url);
+	if (s->alwaysDeny) TextureUrls_Deny(&s->url);
 	Gui_Remove((struct Screen*)s);
+
+	if (s->alwaysDeny) CPE_SendNotifyAction(NOTIFY_ACTION_TEXTURE_PROMPT_RESPONDED, 0);
+	else CPE_SendNotifyAction(NOTIFY_ACTION_TEXTURE_PROMPT_RESPONDED, 1);
 }
 
 static void TexPackOverlay_GoBackClick(void* screen, void* b) {
@@ -2959,3 +2973,7 @@ void NostalgiaMenuScreen_Show(void) {
 	s->VTABLE     = &NostalgiaMenuScreen_VTABLE;
 	Gui_Add((struct Screen*)s, GUI_PRIORITY_MENU);
 }
+#else
+void TexIdsOverlay_Show(void) { }
+void UrlWarningOverlay_Show(const cc_string* url) { }
+#endif

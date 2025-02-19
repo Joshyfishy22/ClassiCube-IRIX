@@ -475,7 +475,13 @@ static void Game_Load(void) {
 	}
 
 	entTaskI = ScheduledTask_Add(GAME_DEF_TICKS, Entities_Tick);
-	if (Gfx_WarnIfNecessary()) EnvRenderer_SetMode(EnvRenderer_Minimal | ENV_LEGACY);
+	Gfx_WarnIfNecessary();
+
+	if (Gfx.Limitations & GFX_LIMIT_VERTEX_ONLY_FOG)
+		EnvRenderer_SetMode(EnvRenderer_Minimal | ENV_LEGACY);
+	if (Gfx.BackendType == CC_GFX_BACKEND_SOFTGPU)
+		EnvRenderer_SetMode(ENV_MINIMAL);
+
 	Server.BeginConnect();
 }
 
@@ -701,6 +707,10 @@ static CC_INLINE void Game_DrawFrame(float delta, float t) {
 		extern void Gfx_SetTopRight(void);
 		Gfx_SetTopRight();
 		Gui_RenderGui(delta);
+	}
+	for (i = 0; i < Array_Elems(Game.Draw2DHooks); i++)
+	{
+		if (Game.Draw2DHooks[i]) Game.Draw2DHooks[i](delta);
 	}
 #endif
 	Gfx_End2D();
