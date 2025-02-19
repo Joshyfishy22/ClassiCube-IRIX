@@ -847,7 +847,7 @@ cc_bool GLContext_SwapBuffers(void) {
 	return true;
 }
 
-void GLContext_SetVSync(cc_bool vsync) {
+void GLContext_SetFpsLimit(cc_bool vsync, float minFrameMs) {
 	int value = vsync ? 1 : 0;
 	[ctxHandle setValues:&value forParameter: NSOpenGLCPSwapInterval];
 }

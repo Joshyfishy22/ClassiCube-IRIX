@@ -427,9 +427,15 @@ cc_result Gfx_TakeScreenshot(struct Stream* output);
 /* Warns in chat if the graphics backend has problems with the user's GPU */
 /* Returns whether legacy rendering mode for borders/sky/clouds is needed */
 cc_bool Gfx_WarnIfNecessary(void);
-cc_bool Gfx_GetUIOptions(struct MenuOptionsScreen* s);
-/* Gets information about the user's GPU and graphics backend state */
-/* Backend state may include depth buffer bits, total free memory, etc */
+/* Sets up state for rendering a new frame */
+void Gfx_BeginFrame(void);
+/* Finishes rendering a frame, and swaps it with the back buffer */
+void Gfx_EndFrame(void);
+/* Sets whether to synchronise with monitor refresh to avoid tearing, and maximum frame rate */
+/* NOTE: VSync setting may be unsupported or just ignored */
+void Gfx_SetFpsLimit(cc_bool vsync, float minFrameMillis);
+/* Gets information about the user's GPU and current backend state */
+/* Backend state may include depth buffer bits, free memory, etc */
 /* NOTE: Each line is separated by \n */
 void Gfx_GetApiInfo(cc_string* info);
 

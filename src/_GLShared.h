@@ -25,20 +25,22 @@
 /*########################################################################################################################*
 *---------------------------------------------------------General---------------------------------------------------------*
 *#########################################################################################################################*/
-static void GLContext_GetAll(const struct DynamicLibSym* syms, int count) {
-	int i;
-	for (i = 0; i < count; i++) 
-	{
-		*syms[i].symAddr = GLContext_GetAddress(syms[i].name);
-	}
+static void GL_UpdateVsync(void) {
+	GLContext_SetFpsLimit(gfx_vsync, gfx_minFrameMs);
 }
 
-static void GL_InitCommon(void) {
-	_glGetIntegerv(GL_MAX_TEXTURE_SIZE, &Gfx.MaxTexWidth);
+static void GLBackend_Init(void);
+void Gfx_Create(void) {
+	GLContext_Create();
+	glGetIntegerv(GL_MAX_TEXTURE_SIZE, &Gfx.MaxTexWidth);
 	Gfx.MaxTexHeight = Gfx.MaxTexWidth;
 	Gfx.Created      = true;
 	/* necessary for android which "loses" context when window is closed */
 	Gfx.LostContext  = false;
+
+	GLBackend_Init();
+	Gfx_RestoreState();
+	GL_UpdateVsync();
 }
 
 cc_bool Gfx_TryRestoreContext(void) {
@@ -301,9 +303,10 @@ void Gfx_GetApiInfo(cc_string* info) {
 	GLContext_GetApiInfo(info);
 }
 
-void Gfx_SetVSync(cc_bool vsync) {
-	gfx_vsync = vsync;
-	if (Gfx.Created) GLContext_SetVSync(gfx_vsync);
+void Gfx_SetFpsLimit(cc_bool vsync, float minFrameMs) {
+	gfx_minFrameMs = minFrameMs;
+	gfx_vsync      = vsync;
+	if (Gfx.Created) GL_UpdateVsync();
 }
 
 void Gfx_BeginFrame(void) { }
@@ -326,6 +329,7 @@ void Gfx_EndFrame(void) {
 	/* TODO always run ?? */
 
 	if (!GLContext_SwapBuffers()) Gfx_LoseContext("GLContext lost");
+	if (gfx_minFrameMs) LimitFPS();
 }
 
 void Gfx_OnWindowResize(void) {

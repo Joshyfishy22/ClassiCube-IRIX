@@ -772,8 +772,9 @@ void Gfx_GetApiInfo(cc_string* info) {
 	PrintMaxTextureInfo(info);
 }
 
-void Gfx_SetVSync(cc_bool vsync) {
-	gfx_vsync = vsync;
+void Gfx_SetFpsLimit(cc_bool vsync, float minFrameMs) {
+	gfx_minFrameMs = minFrameMs;
+	gfx_vsync      = vsync;
 }
 
 void Gfx_BeginFrame(void) {
@@ -817,6 +818,7 @@ void Gfx_EndFrame(void) {
 	sceGxmEndScene(gxm_context, NULL, NULL);
 
 	Gfx_NextFramebuffer();
+	if (gfx_minFrameMs) LimitFPS();
 }
 
 void Gfx_OnWindowResize(void) { }

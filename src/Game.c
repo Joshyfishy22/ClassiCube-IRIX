@@ -43,7 +43,7 @@
 #include "EntityRenderers.h"
 
 struct _GameData Game;
-static cc_uint64 frameStart;
+cc_uint64 Game_FrameStart;
 cc_bool Game_UseCPEBlocks;
 
 struct RayTracer Game_SelectedPos;
@@ -54,7 +54,6 @@ int Game_MaxViewDistance  = DEFAULT_MAX_VIEWDIST;
 int     Game_FpsLimit, Game_Vertices;
 cc_bool Game_SimpleArmsAnim;
 static cc_bool gameRunning;
-static float gfx_minFrameMs;
 
 cc_bool Game_ClassicMode, Game_ClassicHacks;
 cc_bool Game_AllowCustomBlocks;
@@ -311,8 +310,7 @@ static void HandleOnNewMapLoaded(void* obj) {
 static void HandleInactiveChanged(void* obj) {
 	if (Window_Main.Inactive) {
 		Chat_AddOf(&Gfx_LowPerfMessage, MSG_TYPE_EXTRASTATUS_2);
-		Gfx_SetVSync(false);
-		Game_SetMinFrameTime(1000 / 1.0f);
+		Gfx_SetFpsLimit(false, 1000 / 1.0f);
 		Gfx.ReducedPerfMode = true;
 	} else {
 		Chat_AddOf(&String_Empty,       MSG_TYPE_EXTRASTATUS_2);
@@ -495,21 +493,13 @@ void Game_SetFpsLimit(int method) {
 	case FPS_LIMIT_60:  minFrameTime = 1000/60.0f;  break;
 	case FPS_LIMIT_30:  minFrameTime = 1000/30.0f;  break;
 	}
-	Gfx_SetVSync(method == FPS_LIMIT_VSYNC);
-	Game_SetMinFrameTime(minFrameTime);
+	Gfx_SetFpsLimit(method == FPS_LIMIT_VSYNC, minFrameTime);
 }
 
-#ifdef CC_BUILD_WEB
-extern void Window_SetMinFrameTime(float timeMS);
-
-void Game_SetMinFrameTime(float frameTimeMS) {
-	if (frameTimeMS) Window_SetMinFrameTime(frameTimeMS);
+static void UpdateViewMatrix(void) {
+	Camera.Active->GetView(&Gfx.View);
+	FrustumCulling_CalcFrustumEquations(&Gfx.Projection, &Gfx.View);
 }
-#else
-void Game_SetMinFrameTime(float frameTimeMS) {
-	gfx_minFrameMs = frameTimeMS;
-}
-#endif
 
 static void Render3DFrame(float delta, float t) {
 	struct Matrix mvp;
@@ -633,50 +623,6 @@ void Game_TakeScreenshot(void) {
 #endif
 }
 
-
-#ifdef CC_BUILD_WEB
-static void LimitFPS(void) {
-	/* Can't use Thread_Sleep on the web. (spinwaits instead of sleeping) */
-	/* Instead the web browser manages the frame timing */
-}
-#else
-static float gfx_targetTime, gfx_actualTime;
-
-static CC_INLINE float ElapsedMilliseconds(cc_uint64 beg, cc_uint64 end) {
-	cc_uint64 elapsed = Stopwatch_ElapsedMicroseconds(beg, end);
-	if (elapsed > 5000000) elapsed = 5000000;
-	
-	/* Avoid uint64 / float division, as that typically gets implemented */
-	/* using a library function rather than a direct CPU instruction */
-	return (int)elapsed / 1000.0f;
-}
-
-/* Examines difference between expected and actual frame times, */
-/*  then sleeps if actual frame time is too fast */
-static void LimitFPS(void) {
-	cc_uint64 frameEnd, sleepEnd;
-	
-	frameEnd = Stopwatch_Measure();
-	gfx_actualTime += ElapsedMilliseconds(frameStart, frameEnd);
-	gfx_targetTime += gfx_minFrameMs;
-
-	/* going faster than FPS limit - sleep to slow down */
-	if (gfx_actualTime < gfx_targetTime) {
-		float cooldown = gfx_targetTime - gfx_actualTime;
-		Thread_Sleep((int)(cooldown + 0.5f));
-
-		/* also accumulate Thread_Sleep duration, as actual sleep */
-		/*  duration can significantly deviate from requested time */
-		/*  (e.g. requested 4ms, but actually slept for 8ms) */
-		sleepEnd = Stopwatch_Measure();
-		gfx_actualTime += ElapsedMilliseconds(frameEnd, sleepEnd);
-	}
-
-	/* reset accumulated time to avoid excessive FPS drift */
-	if (gfx_targetTime >= 1000) { gfx_actualTime = 0; gfx_targetTime = 0; }
-}
-#endif
-
 static CC_INLINE void Game_DrawFrame(float delta, float t) {
 	int i;
 
@@ -743,17 +689,13 @@ static CC_INLINE void Game_RenderFrame(void) {
 	double deltaD;
 	float t, delta;
 
-	cc_uint64 render  = Stopwatch_Measure();
-	cc_uint64 elapsed = Stopwatch_ElapsedMicroseconds(frameStart, render);
-	/* avoid large delta with suspended process */
-	if (elapsed > 5000000) elapsed = 5000000;
-	
-	deltaD = (int)elapsed / (1000.0 * 1000.0);
-	delta  = (float)deltaD;
+	cc_uint64 render = Stopwatch_Measure();
+	double delta     = Stopwatch_ElapsedMicroseconds(Game_FrameStart, render) / (1000.0 * 1000.0);
 	Window_ProcessEvents(delta);
 
-	if (delta <= 0.0f) return;
-	frameStart = render;
+	if (delta > 5.0)  delta = 5.0; /* avoid large delta with suspended process */
+	if (delta <= 0.0) return;
+	Game_FrameStart = render;
 
 	/* TODO: Should other tasks get called back too? */
 	/* Might not be such a good idea for the http_clearcache, */
@@ -836,9 +778,7 @@ static CC_INLINE void Game_RenderFrame(void) {
 
 	if (Game_ScreenshotRequested) Game_TakeScreenshot();
 	Gfx_EndFrame();
-	if (gfx_minFrameMs) LimitFPS();
 }
-
 
 static void Game_Free(void) {
 	struct IGameComponent* comp;
@@ -908,7 +848,7 @@ void Game_Run(int width, int height, const cc_string* title) {
 	Game_Load();
 	Event_RaiseVoid(&WindowEvents.Resized);
 
-	frameStart = Stopwatch_Measure();
+	Game_FrameStart = Stopwatch_Measure();
 	Game_RunLoop();
 	Window_Destroy();
 }

@@ -160,6 +160,431 @@ void Platform_Log(const char* msg, int len) {
 
 
 /*########################################################################################################################*
+*---------------------------------------------------------Window----------------------------------------------------------*
+*#########################################################################################################################*/
+// no cursor on iOS
+void Cursor_GetRawPos(int* x, int* y) { *x = 0; *y = 0; }
+void Cursor_SetPosition(int x, int y) { }
+void Cursor_DoSetVisible(cc_bool visible) { }
+
+void Window_SetTitle(const cc_string* title) {
+    // TODO: Implement this somehow
+}
+
+void Window_PreInit(void) { }
+void Window_Init(void) {
+    //Window_Main.SoftKeyboard = SOFT_KEYBOARD_RESIZE;
+    // keyboard now shifts up
+    Window_Main.SoftKeyboard = SOFT_KEYBOARD_SHIFT;
+    Input_SetTouchMode(true);
+    Input.Sources = INPUT_SOURCE_NORMAL;
+    Gui_SetTouchUI(true);
+    
+    DisplayInfo.Depth  = 32;
+    DisplayInfo.ScaleX = 1; // TODO dpi scale
+    DisplayInfo.ScaleY = 1; // TODO dpi scale
+    NSSetUncaughtExceptionHandler(LogUnhandledNSErrors);
+}
+
+void Window_Free(void) { }
+
+static UIColor* CalcBackgroundColor(void) {
+    // default to purple if no themed background color yet
+    if (!Launcher_Theme.BackgroundColor)
+        return UIColor.purpleColor;
+    return ToUIColor(Launcher_Theme.BackgroundColor, 1.0f);
+}
+
+static CGRect DoCreateWindow(void) {
+    // UIKeyboardWillShowNotification - iOS 2.0
+    cc_controller = [CCViewController alloc];
+    UpdateStatusBar();
+    
+    CGRect bounds = GetViewFrame();
+    win_handle    = [[CCWindow alloc] initWithFrame:bounds];
+    
+    win_handle.rootViewController = cc_controller;
+    win_handle.backgroundColor = CalcBackgroundColor();
+    Window_Main.Exists   = true;
+    Window_Main.UIScaleX = DEFAULT_UI_SCALE_X;
+    Window_Main.UIScaleY = DEFAULT_UI_SCALE_Y;
+
+    Window_Main.Width  = bounds.size.width;
+    Window_Main.Height = bounds.size.height;
+	Window_Main.SoftKeyboardInstant = true;
+    
+    NSNotificationCenter* notifications = NSNotificationCenter.defaultCenter;
+    [notifications addObserver:cc_controller selector:@selector(keyboardDidShow:) name:UIKeyboardWillShowNotification object:nil];
+    [notifications addObserver:cc_controller selector:@selector(keyboardDidHide:) name:UIKeyboardWillHideNotification object:nil];
+    return bounds;
+}
+void Window_SetSize(int width, int height) { }
+
+void Window_Show(void) {
+    [win_handle makeKeyAndVisible];
+}
+
+void Window_RequestClose(void) {
+    Window_Main.Exists = false;
+    Event_RaiseVoid(&WindowEvents.Closing);
+}
+
+void Window_ProcessEvents(float delta) {
+    SInt32 res;
+    // manually tick event queue
+    do {
+        res = CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0, TRUE);
+    } while (res == kCFRunLoopRunHandledSource);
+}
+
+void Window_ProcessGamepads(float delta) { }
+
+void ShowDialogCore(const char* title, const char* msg) {
+    // UIAlertController - iOS 8.0
+    // UIAlertAction - iOS 8.0
+    // UIAlertView - iOS 2.0
+    Platform_LogConst(title);
+    Platform_LogConst(msg);
+    NSString* _title = [NSString stringWithCString:title encoding:NSASCIIStringEncoding];
+    NSString* _msg   = [NSString stringWithCString:msg encoding:NSASCIIStringEncoding];
+    alert_completed  = false;
+    
+#ifdef TARGET_OS_TV
+    UIAlertController* alert = [UIAlertController alertControllerWithTitle:_title message:_msg preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertAction* okBtn     = [UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:^(UIAlertAction* act) { alert_completed = true; }];
+    [alert addAction:okBtn];
+    [cc_controller presentViewController:alert animated:YES completion: Nil];
+#else
+    UIAlertView* alert = [UIAlertView alloc];
+    alert = [alert initWithTitle:_title message:_msg delegate:cc_controller cancelButtonTitle:@"OK" otherButtonTitles:nil];
+    [alert show];
+#endif
+    
+    // TODO clicking outside message box crashes launcher
+    // loop until alert is closed TODO avoid sleeping
+    while (!alert_completed) {
+        Window_ProcessEvents(0.0);
+        Thread_Sleep(16);
+    }
+}
+
+
+@interface CCKBController : NSObject<UITextFieldDelegate>
+@end
+
+@implementation CCKBController
+- (void)handleTextChanged:(id)sender {
+    UITextField* src = (UITextField*)sender;
+    const char* str  = src.text.UTF8String;
+    
+    char tmpBuffer[NATIVE_STR_LEN];
+    cc_string tmp = String_FromArray(tmpBuffer);
+    String_AppendUtf8(&tmp, str, String_Length(str));
+    
+    Event_RaiseString(&InputEvents.TextChanged, &tmp);
+}
+
+// === UITextFieldDelegate ===
+- (BOOL)textFieldShouldReturn:(UITextField *)textField {
+    // textFieldShouldReturn - iOS 2.0
+    Input_SetPressed(CCKEY_ENTER);
+    Input_SetReleased(CCKEY_ENTER);
+    return YES;
+}
+@end
+
+static void LInput_SetKeyboardType(UITextField* fld, int flags);
+static void LInput_SetPlaceholder(UITextField* fld, const char* placeholder);
+static UITextField* text_input;
+static CCKBController* kb_controller;
+
+void OnscreenKeyboard_Open(struct OpenKeyboardArgs* args) {
+    if (!kb_controller) {
+        kb_controller = [[CCKBController alloc] init];
+        CFBridgingRetain(kb_controller); // prevent GC TODO even needed?
+    }
+	DisplayInfo.ShowingSoftKeyboard = true;
+    
+    text_input = [[UITextField alloc] initWithFrame:CGRectZero];
+    text_input.hidden   = YES;
+    text_input.delegate = kb_controller;
+    [text_input addTarget:kb_controller action:@selector(handleTextChanged:) forControlEvents:UIControlEventEditingChanged];
+    
+    LInput_SetKeyboardType(text_input, args->type);
+    LInput_SetPlaceholder(text_input,  args->placeholder);
+    
+    [view_handle addSubview:text_input];
+    [text_input becomeFirstResponder];
+}
+
+void OnscreenKeyboard_SetText(const cc_string* text) {
+    NSString* str = ToNSString(text);
+    NSString* cur = text_input.text;
+    
+    // otherwise on iOS 5, this causes an infinite loop
+    if (cur && [str isEqualToString:cur]) return;
+    text_input.text = str;
+}
+
+void OnscreenKeyboard_Draw2D(Rect2D* r, struct Bitmap* bmp) { }
+void OnscreenKeyboard_Draw3D(void) { }
+
+void OnscreenKeyboard_Close(void) {
+	DisplayInfo.ShowingSoftKeyboard = false;
+    [text_input resignFirstResponder];
+}
+
+int Window_GetWindowState(void) {
+    return fullscreen ? WINDOW_STATE_FULLSCREEN : WINDOW_STATE_NORMAL;
+}
+
+static void ToggleFullscreen(cc_bool isFullscreen) {
+    fullscreen = isFullscreen;
+    UpdateStatusBar();
+    view_handle.frame = GetViewFrame();
+}
+
+cc_result Window_EnterFullscreen(void) {
+    ToggleFullscreen(true); return 0;
+}
+cc_result Window_ExitFullscreen(void) {
+    ToggleFullscreen(false); return 0;
+}
+int Window_IsObscured(void) { return 0; }
+
+void Window_EnableRawMouse(void)  { DefaultEnableRawMouse(); }
+void Window_UpdateRawMouse(void)  { }
+void Window_DisableRawMouse(void) { DefaultDisableRawMouse(); }
+
+void Window_LockLandscapeOrientation(cc_bool lock) {
+    // attemptRotationToDeviceOrientation - iOS 5.0
+    // TODO doesn't work properly.. setting 'UIInterfaceOrientationUnknown' apparently
+    //  restores orientation, but doesn't actually do that when I tried it
+    if (lock) {
+        //NSInteger ori    = lock ? UIInterfaceOrientationLandscapeRight : UIInterfaceOrientationUnknown;
+        NSInteger ori    = UIInterfaceOrientationLandscapeRight;
+        UIDevice* device = UIDevice.currentDevice;
+        NSNumber* value  = [NSNumber numberWithInteger:ori];
+        [device setValue:value forKey:@"orientation"];
+    }
+    
+    landscape_locked = lock;
+    [UIViewController attemptRotationToDeviceOrientation];
+}
+
+cc_result Window_OpenFileDialog(const struct OpenFileDialogArgs* args) {
+    // UIDocumentPickerViewController - iOS 8.0
+    // see the custom UTITypes declared in Info.plist 
+    NSDictionary* fileExt_map =
+    @{
+      @".cw"  : @"com.classicube.client.ios-cw",
+      @".dat" : @"com.classicube.client.ios-dat",
+      @".lvl" : @"com.classicube.client.ios-lvl",
+      @".fcm" : @"com.classicube.client.ios-fcm",
+      @".zip" : @"public.zip-archive"
+    };
+    NSMutableArray* types = [NSMutableArray array];
+    const char* const* filters = args->filters;
+
+    for (int i = 0; filters[i]; i++) 
+    {
+        NSString* fileExt = [NSString stringWithUTF8String:filters[i]];
+        NSString* utType  = [fileExt_map objectForKey:fileExt];
+        if (utType) [types addObject:utType];
+    }
+    
+    UIDocumentPickerViewController* dlg;
+    dlg = [UIDocumentPickerViewController alloc];
+    dlg = [dlg initWithDocumentTypes:types inMode:UIDocumentPickerModeOpen];
+    //dlg = [dlg initWithDocumentTypes:types inMode:UIDocumentPickerModeImport];
+    
+    open_dlg_callback = args->Callback;
+    dlg.delegate = cc_controller;
+    [cc_controller presentViewController:dlg animated:YES completion: Nil];
+    return 0; // TODO still unfinished
+}
+
+cc_result Window_SaveFileDialog(const struct SaveFileDialogArgs* args) {
+    if (!args->defaultName.length) return SFD_ERR_NEED_DEFAULT_NAME;
+    // UIDocumentPickerViewController - iOS 8.0
+    
+    // save the item to a temp file, which is then (usually) later deleted by picker callbacks
+    Directory_Create(FILEPATH_RAW("Exported"));
+    
+    save_path.length = 0;
+    String_Format2(&save_path, "Exported/%s%c", &args->defaultName, args->filters[0]);
+    args->Callback(&save_path);
+    
+    NSString* str = ToNSString(&save_path);
+    NSURL* url    = [NSURL fileURLWithPath:str isDirectory:NO];
+    
+    UIDocumentPickerViewController* dlg;
+    dlg = [UIDocumentPickerViewController alloc];
+    dlg = [dlg initWithURL:url inMode:UIDocumentPickerModeExportToService];
+    
+    dlg.delegate = cc_controller;
+    [cc_controller presentViewController:dlg animated:YES completion: Nil];
+    return 0;
+}
+
+
+/*#########################################################################################################################*
+ *-----------------------------------------------------Window creation-----------------------------------------------------*
+ *#########################################################################################################################*/
+@interface CC3DView : UIView
+@end
+static void Init3DLayer(void);
+
+void Window_Create2D(int width, int height) {
+    launcherMode  = true;
+    CGRect bounds = DoCreateWindow();
+    
+    view_handle = [[UIView alloc] initWithFrame:bounds];
+    view_handle.multipleTouchEnabled = true;
+    cc_controller.view = view_handle;
+}
+
+void Window_Create3D(int width, int height) {
+    launcherMode  = false;
+    CGRect bounds = DoCreateWindow();
+    
+    view_handle = [[CC3DView alloc] initWithFrame:bounds];
+    view_handle.multipleTouchEnabled = true;
+    cc_controller.view = view_handle;
+
+    Init3DLayer();
+}
+
+
+/*########################################################################################################################*
+*--------------------------------------------------------GLContext--------------------------------------------------------*
+*#########################################################################################################################*/
+#if (CC_GFX_BACKEND & CC_GFX_BACKEND_GL_MASK)
+#include <OpenGLES/ES2/gl.h>
+#include <OpenGLES/ES2/glext.h>
+
+static EAGLContext* ctx_handle;
+static GLuint framebuffer;
+static GLuint color_renderbuffer, depth_renderbuffer;
+static int fb_width, fb_height;
+
+static void UpdateColorbuffer(void) {
+    CAEAGLLayer* layer = (CAEAGLLayer*)view_handle.layer;
+    glBindRenderbuffer(GL_RENDERBUFFER, color_renderbuffer);
+    
+    if (![ctx_handle renderbufferStorage:GL_RENDERBUFFER fromDrawable:layer])
+        Logger_Abort("Failed to link renderbuffer to window");
+}
+
+static void UpdateDepthbuffer(void) {
+    int backingW = 0, backingH = 0;
+    
+    // In case layer dimensions are different
+    glBindRenderbuffer(GL_RENDERBUFFER, color_renderbuffer);
+    glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_WIDTH,  &backingW);
+    glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_HEIGHT, &backingH);
+    
+    // Shouldn't happen but just in case
+    if (backingW <= 0) backingW = Window_Main.Width;
+    if (backingH <= 0) backingH = Window_Main.Height;
+    
+    glBindRenderbuffer(GL_RENDERBUFFER, depth_renderbuffer);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24_OES, backingW, backingH);
+}
+
+static void CreateFramebuffer(void) {
+    glGenFramebuffers(1, &framebuffer);
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    
+    glGenRenderbuffers(1, &color_renderbuffer);
+    UpdateColorbuffer();
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, color_renderbuffer);
+
+    glGenRenderbuffers(1, &depth_renderbuffer);
+    UpdateDepthbuffer();
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,  GL_RENDERBUFFER, depth_renderbuffer);
+    
+    GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    if (status != GL_FRAMEBUFFER_COMPLETE)
+        Logger_Abort2(status, "Failed to create renderbuffer");
+    
+    fb_width  = Window_Main.Width;
+    fb_height = Window_Main.Height;
+}
+
+void GLContext_Create(void) {
+    ctx_handle = [[EAGLContext alloc] initWithAPI:kEAGLRenderingAPIOpenGLES2];
+    [EAGLContext setCurrentContext:ctx_handle];
+    
+    // unlike other platforms, have to manually setup render framebuffer
+    CreateFramebuffer();
+}
+                  
+void GLContext_Update(void) {
+    // trying to update renderbuffer here results in garbage output,
+    //  so do instead when layoutSubviews method is called
+}
+
+static void GLContext_OnLayout(void) {
+    // only resize buffers when absolutely have to
+    if (fb_width == Window_Main.Width && fb_height == Window_Main.Height) return;
+    fb_width  = Window_Main.Width;
+    fb_height = Window_Main.Height;
+    
+    UpdateColorbuffer();
+    UpdateDepthbuffer();
+}
+
+void GLContext_Free(void) {
+    glDeleteRenderbuffers(1, &color_renderbuffer); color_renderbuffer = 0;
+    glDeleteRenderbuffers(1, &depth_renderbuffer); depth_renderbuffer = 0;
+    glDeleteFramebuffers(1, &framebuffer);         framebuffer        = 0;
+    
+    [EAGLContext setCurrentContext:Nil];
+}
+
+cc_bool GLContext_TryRestore(void) { return false; }
+void* GLContext_GetAddress(const char* function) { return NULL; }
+
+cc_bool GLContext_SwapBuffers(void) {
+    static GLenum discards[] = { GL_DEPTH_ATTACHMENT };
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    glDiscardFramebufferEXT(GL_FRAMEBUFFER, 1, discards);
+    glBindRenderbuffer(GL_RENDERBUFFER, color_renderbuffer);
+    [ctx_handle presentRenderbuffer:GL_RENDERBUFFER];
+    return true;
+}
+void GLContext_SetFpsLimit(cc_bool vsync, float minFrameMs) { }
+void GLContext_GetApiInfo(cc_string* info) { }
+
+
+@implementation CC3DView
+
++ (Class)layerClass {
+    return [CAEAGLLayer class];
+}
+
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    GLContext_OnLayout();
+}
+@end
+
+static void Init3DLayer(void) {
+    // CAEAGLLayer - iOS 2.0
+    CAEAGLLayer* layer = (CAEAGLLayer*)view_handle.layer;
+
+    layer.opaque = YES;
+    layer.drawableProperties =
+   @{
+        kEAGLDrawablePropertyRetainedBacking : [NSNumber numberWithBool:NO],
+        kEAGLDrawablePropertyColorFormat : kEAGLColorFormatRGBA8
+    };
+}
+#endif
+
+
+/*########################################################################################################################*
  *--------------------------------------------------------Updater----------------------------------------------------------*
  *#########################################################################################################################*/
 const struct UpdaterInfo Updater_Info = {

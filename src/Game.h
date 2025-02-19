@@ -23,6 +23,8 @@ CC_VAR extern struct _GameData {
 	Game_Draw2DHook Draw2DHooks[4];
 } Game;
 
+/* Stopwatch measurement of when current frame started */
+extern cc_uint64 Game_FrameStart;
 extern struct RayTracer Game_SelectedPos;
 extern cc_bool Game_UseCPEBlocks;
 
@@ -115,7 +117,6 @@ void Game_UpdateDimensions(void);
 /* Sets the strategy/method used to limit frames per second. */
 /* See FPS_LIMIT_ for valid strategies/methods */
 void Game_SetFpsLimit(int method);
-void Game_SetMinFrameTime(float frameTimeMS);
 
 cc_bool Game_UpdateTexture(GfxResourceID* texId, struct Stream* src, const cc_string* file, 
 							cc_uint8* skinType, int* heightDivisor);
