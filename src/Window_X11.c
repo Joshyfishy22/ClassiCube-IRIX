@@ -1529,6 +1529,7 @@ static void GetAttribs(struct GraphicsMode* mode, int* attribs, int depth) {
 	attribs[i++] = GLX_DEPTH_SIZE; attribs[i++] = depth;
 
 	attribs[i++] = GLX_DOUBLEBUFFER;
+	attribs[i++] = True;
 	attribs[i++] = 0;
 }
 
