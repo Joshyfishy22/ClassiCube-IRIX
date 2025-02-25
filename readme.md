@@ -374,7 +374,7 @@ Run `make saturn`. You'll need [libyaul](https://github.com/yaul-org/libyaul)
 1. Install required packages if needed
 2. Run either:
     * `make irix` or
-    * `gcc -fno-math-errno src/*.c -o ClassiCube -lGL -lX11 -lXi -lpthread -ldl -lGLcore -Wl,--allow-shlib-undefine -DCC_BUILD_GL11`
+    * `gcc -fno-math-errno src/*.c -o ClassiCube -L/usr/lib32 -Wl,-rpath=/usr/lib32 -lGL -lX11 -lXi -lpthread -ldl -lGLcore -Wl,--allow-shlib-undefined -DCC_BUILD_GL11 `
 
 #### SerenityOS
 
