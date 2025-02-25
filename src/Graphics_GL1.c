@@ -588,13 +588,7 @@ static void APIENTRY gl10_texImage(GLenum target, GLint level, GLint internalfor
 	gl10_tex->height = height;
 	gl10_tex->pixels = Mem_Alloc(width * height, 4, "GL 1.0 pixels");
 
-	Mem_Copy(gl10_tex->pixels, pixels, width * height * 4);
-	for (i = 0; i < width * height * 4; i += 4) 
-	{
-		cc_uint8 t = gl10_tex->pixels[i + 2];
-		gl10_tex->pixels[i + 2] = gl10_tex->pixels[i + 0];
-		gl10_tex->pixels[i + 0] = t;
-	}
+	ConvertRGBA(gl10_tex->pixels, pixels, width * height);
 }
 
 static void APIENTRY gl10_texSubImage(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type, const GLvoid* pixels) {
@@ -708,7 +702,9 @@ static void GLBackend_Init(void) {
 		DynamicLib_ReqSym2("glGenBuffersARB",    glGenBuffers), DynamicLib_ReqSym2("glBufferDataARB",    glBufferData),
 		DynamicLib_ReqSym2("glBufferSubDataARB", glBufferSubData)
 	};
-	static const cc_string vboExt = String_FromConst("GL_ARB_vertex_buffer_object");
+
+	static const cc_string vboExt  = String_FromConst("GL_ARB_vertex_buffer_object");
+	static const cc_string bgraExt = String_FromConst("GL_EXT_bgra");
 	cc_string extensions = String_FromReadonly((const char*)_glGetString(GL_EXTENSIONS));
 	const GLubyte* ver   = _glGetString(GL_VERSION);
 
@@ -721,6 +717,8 @@ static void GLBackend_Init(void) {
 	} else if (String_CaselessContains(&extensions, &vboExt)) {
 		GLContext_GetAll(arbVboFuncs,  Array_Elems(arbVboFuncs));
 	} else {
+		/* Some old IRIX cards don't support BGRA */
+		convert_rgba = major == 1 && minor <= 1 && String_CaselessContains(&extensions, &bgraExt);
 		FallbackOpenGL();
 	}
 }
